@@ -39,4 +39,8 @@ public record Pot(
     public Pot resetBet() {
         return new Pot(mainPot, sidePots, 0);
     }
+
+    public Pot addToMain(int amount) {
+        return withMainPot(mainPot + amount);
+    }
 }

@@ -1,4 +1,4 @@
-package engine.engine;
+package engine.engine.phase;
 
 import engine.domain.action.GameAction;
 import engine.domain.model.GameResult;
