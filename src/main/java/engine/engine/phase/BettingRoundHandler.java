@@ -17,7 +17,7 @@ import java.util.List;
 public final class BettingRoundHandler {
     private BettingRoundHandler() {}
 
-    private static GameResult applyAction(GameState state, GameAction action) {
+    public static GameResult applyAction(GameState state, GameAction action) {
         ActionValidator.validate(state, action);
         List<GameEvent> events = new ArrayList<>();
         GameState next = switch (action.type()) {
