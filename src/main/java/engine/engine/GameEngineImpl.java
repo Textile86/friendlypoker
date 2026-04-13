@@ -1,12 +1,10 @@
-package engine.engine.engine;
+package engine.engine;
 
 import engine.domain.action.GameAction;
 import engine.domain.event.GameEvent;
 import engine.domain.model.*;
 import engine.domain.model.enums.GamePhase;
 import engine.domain.model.enums.PlayerStatus;
-import engine.engine.GameEngine;
-import engine.engine.PlayerTurnManager;
 import engine.engine.phase.PhaseHandler;
 
 import java.util.ArrayList;

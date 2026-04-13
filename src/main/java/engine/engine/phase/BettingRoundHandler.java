@@ -40,7 +40,7 @@ public final class BettingRoundHandler {
 
     private static GameState applyCheck(GameState state, GameAction action, List<GameEvent> events) {
         PlayerState player = findPlayer(state, action.playerId());
-        events.add(new GameEvent.PlayerActed(state.tableId(), ActionType.CHECK, 0, player.chips()));
+        events.add(new GameEvent.PlayerActed(state.tableId(), action.playerId(), ActionType.CHECK, 0, player.chips()));
         return state;
     }
 
