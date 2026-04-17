@@ -27,8 +27,11 @@ public final class PlayerTurnManager {
         List<PlayerState> players = state.players();
         int size = players.size();
 
-        int offset = isPreFlop ? 3 : 1;
-        int start = (state.dealerIndex() + offset) / size;
+        // Pre-flop: first to act is the player after the BB (UTG).
+        // Post-flop: first to act is the player after the dealer (SB position).
+        int start = isPreFlop
+                ? (bigBlindIndex(state) + 1) % size
+                : (state.dealerIndex() + 1) % size;
 
         for (int i = 0; i < size; i++) {
             int idx = (start + i) % size;
@@ -44,7 +47,8 @@ public final class PlayerTurnManager {
     }
 
     public static int bigBlindIndex(GameState state) {
-        return nextActiveIndex(state, smallBlindIndex(state));
+        int size = state.players().size();
+        return nextActiveIndex(state, (smallBlindIndex(state) + 1) % size);
     }
 
     public static int nextActiveIndex(GameState state, int from) {

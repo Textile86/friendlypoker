@@ -12,7 +12,8 @@ public record PlayerState(
         PlayerStatus status,
         int currentBet,
         int totalBet,
-        int seatIndex
+        int seatIndex,
+        boolean hasActedThisRound
 ) {
     public PlayerState {
         if (chips < 0) throw new IllegalArgumentException("chips cannot be negative");
@@ -21,31 +22,31 @@ public record PlayerState(
     }
 
     public static PlayerState joining(String id, String displayName, int chips, int seatIndex) {
-        return new PlayerState(id, displayName, chips, List.of(), PlayerStatus.WAITING, 0, 0, seatIndex);
+        return new PlayerState(id, displayName, chips, List.of(), PlayerStatus.WAITING, 0, 0, seatIndex, false);
     }
 
     public PlayerState withChips(int chips) {
-        return new PlayerState(id, displayName, chips, holeCards, status, currentBet, totalBet, seatIndex);
+        return new PlayerState(id, displayName, chips, holeCards, status, currentBet, totalBet, seatIndex, hasActedThisRound);
     }
 
     public PlayerState withHoleCards(List<Card> holeCards) {
-        return new PlayerState(id, displayName, chips, holeCards, status, currentBet, totalBet, seatIndex);
+        return new PlayerState(id, displayName, chips, holeCards, status, currentBet, totalBet, seatIndex, hasActedThisRound);
     }
 
     public PlayerState withStatus(PlayerStatus status) {
-        return new PlayerState(id, displayName, chips, holeCards, status, currentBet, totalBet, seatIndex);
+        return new PlayerState(id, displayName, chips, holeCards, status, currentBet, totalBet, seatIndex, hasActedThisRound);
     }
 
     public PlayerState withCurrentBet(int currentBet) {
-        return new PlayerState(id, displayName, chips, holeCards, status, currentBet, totalBet, seatIndex);
+        return new PlayerState(id, displayName, chips, holeCards, status, currentBet, totalBet, seatIndex, hasActedThisRound);
     }
 
     public PlayerState withTotalBet(int totalBet) {
-        return new PlayerState(id, displayName, chips, holeCards, status, currentBet, totalBet, seatIndex);
+        return new PlayerState(id, displayName, chips, holeCards, status, currentBet, totalBet, seatIndex, hasActedThisRound);
     }
 
     public PlayerState withSeatIndex(int seatIndex) {
-        return new PlayerState(id, displayName, chips, holeCards, status, currentBet, totalBet, seatIndex);
+        return new PlayerState(id, displayName, chips, holeCards, status, currentBet, totalBet, seatIndex, hasActedThisRound);
     }
 
     public PlayerState placeBet(int amount) {
@@ -54,11 +55,19 @@ public record PlayerState(
                     .formatted(id, amount, chips));
         }
         return new PlayerState(id, displayName, chips - amount, holeCards, status,
-                currentBet + amount, totalBet + amount, seatIndex);
+                currentBet + amount, totalBet + amount, seatIndex, hasActedThisRound);
     }
 
     public PlayerState resetRoundBet() {
-        return withCurrentBet(0);
+        return new PlayerState(id, displayName, chips, holeCards, status, 0, totalBet, seatIndex, false);
+    }
+
+    public PlayerState markActed() {
+        return new PlayerState(id, displayName, chips, holeCards, status, currentBet, totalBet, seatIndex, true);
+    }
+
+    public PlayerState clearActed() {
+        return new PlayerState(id, displayName, chips, holeCards, status, currentBet, totalBet, seatIndex, false);
     }
 
     public PlayerState award(int amount) {

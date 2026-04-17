@@ -13,8 +13,5 @@ public class RiverHandler extends AbstractBettingPhaseHandler {
         return GamePhase.RIVER;
     }
 
-    @Override
-    protected GameState dealCommunityCards(GameState state, List<GameEvent> events) {
-        return TurnHandler.dealOneCard(state, events, GamePhase.RIVER);
-    }
+    // No community cards to deal when advancing from RIVER to SHOWDOWN
 }

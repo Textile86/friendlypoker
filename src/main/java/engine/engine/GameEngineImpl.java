@@ -123,12 +123,29 @@ public class GameEngineImpl implements GameEngine {
 
     @Override
     public GameResult processAction(GameState state, GameAction action) {
-        PhaseHandler handler = phaseHandlers.stream()
-                .filter(h -> h.canHandle(state.phase()))
+        PhaseHandler handler = findHandler(state.phase());
+        GameResult result = handler.handle(state, action);
+
+        // Auto-resolve phases that require no player input (e.g., SHOWDOWN)
+        while (!result.newState().phase().isBettingPhase()
+                && result.newState().phase() != GamePhase.FINISHED
+                && result.newState().phase() != GamePhase.WAITING) {
+            PhaseHandler next = findHandler(result.newState().phase());
+            GameResult resolved = next.handle(result.newState(), null);
+            List<GameEvent> merged = new ArrayList<>(result.events());
+            merged.addAll(resolved.events());
+            result = GameResult.of(resolved.newState(), merged);
+        }
+
+        return result;
+    }
+
+    private PhaseHandler findHandler(GamePhase phase) {
+        return phaseHandlers.stream()
+                .filter(h -> h.canHandle(phase))
                 .findFirst()
                 .orElseThrow(() -> new IllegalStateException(
-                        "No handler registered for phase: " + state.phase()));
-        return handler.handle(state, action);
+                        "No handler registered for phase: " + phase));
     }
 
     private int nextDealerIndex(GameState state) {
@@ -186,7 +203,7 @@ public class GameEngineImpl implements GameEngine {
 
         for (PlayerState p : dealt) {
             if (p.status().isInHand()) {
-                events.add(new GameEvent.HoleCardDealt(state.tableId(), p.id(), p.holeCards()));
+                events.add(new GameEvent.HoleCardsDealt(state.tableId(), p.id(), p.holeCards()));
             }
         }
 

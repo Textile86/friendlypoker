@@ -10,7 +10,7 @@ import java.util.Map;
 
 public sealed interface GameEvent permits
         GameEvent.HandStarted,
-        GameEvent.HoleCardDealt,
+        GameEvent.HoleCardsDealt,
         GameEvent.BlindPosted,
         GameEvent.PhaseChanged,
         GameEvent.CommunityCardDealt,
@@ -33,7 +33,7 @@ public sealed interface GameEvent permits
     ) implements GameEvent {
     }
 
-    record HoleCardDealt(
+    record HoleCardsDealt(
             String tableId,
             String playerId,
             List<Card> cards

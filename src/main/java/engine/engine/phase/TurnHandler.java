@@ -17,7 +17,7 @@ public class TurnHandler extends AbstractBettingPhaseHandler{
 
     @Override
     protected GameState dealCommunityCards(GameState state, List<GameEvent> events) {
-        return dealOneCard(state, events, GamePhase.TURN);
+        return dealOneCard(state, events, GamePhase.RIVER);
     }
 
     public static GameState dealOneCard(GameState state, List<GameEvent> events, GamePhase phase) {

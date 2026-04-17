@@ -55,7 +55,8 @@ public record GameState(
     public boolean isBettingRoundComplete() {
         return players.stream()
                 .filter(p -> p.status().isInHand())
-                .allMatch(p -> p.status() == PlayerStatus.ALL_IN || p.currentBet() == pot.currentBet());
+                .allMatch(p -> p.status() == PlayerStatus.ALL_IN
+                        || (p.hasActedThisRound() && p.currentBet() == pot.currentBet()));
     }
 
     public GameState withHandNumber(long handNumber) {
