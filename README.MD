@@ -44,7 +44,7 @@
 
 - **Иммутабельность** — `GameState` — неизменяемый record, каждое действие возвращает новое состояние
 - **Event-driven** — движок не знает о WebSocket или БД, только возвращает `List<GameEvent>`
-- **Модульность** — `game-engine` — чистый Java-модуль без зависимостей на Spring
+- **Модульность** — `game-com.friendlypoker.engine` — чистый Java-модуль без зависимостей на Spring
 - **Расширяемость** — добавить новый вариант покера = реализовать интерфейс `GameVariant`
 
 ---
@@ -54,6 +54,6 @@
 ```bash
 # Клонировать и собрать движок
 git clone https://github.com/your-username/friendly-poker
-cd friendly-poker/game-engine
+cd friendly-poker/game-com.friendlypoker.engine
 mvn test
 ```

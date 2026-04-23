@@ -1,0 +1,16 @@
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5433/friendlypoker
+    username: poker
+    password: poker
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    show-sql: false
+  liquibase:
+    change-log: classpath:db/changelog/db.changelog-master.yaml
+
+app:
+  jwt:
+    secret: eW91ci0yNTYtYml0LXNlY3JldC1jaGFuZ2UtaW4tcHJvZC1wbGVhc2UtZG8taXQ=
+    expiration-ms: 86400000   # 24 часа
