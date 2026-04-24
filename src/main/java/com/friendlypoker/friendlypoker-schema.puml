@@ -1,0 +1,57 @@
+plantuml
+@startuml
+skinparam linetype ortho
+skinparam packageStyle frame
+
+title Архитектура Friendly Poker
+
+package "Controller Layer" {
+    class AuthController
+    class MeController
+}
+
+package "DTO / Request" {
+    class LoginRequest
+    class RegisterRequest
+    class AuthResponse
+}
+
+package "Service Layer" {
+    class AuthService
+}
+
+package "Security" {
+    class JwtService
+    class JwtAuthFilter
+    class SecurityConfig
+    class UserDetailsServiceImpl
+}
+
+package "Model (Entities)" {
+    class User
+    class Club
+    class ClubMember
+    enum ClubRole
+}
+
+package "Repository" {
+    interface UserRepository
+}
+
+' Связи
+AuthController --> AuthService
+AuthController ..> LoginRequest
+AuthController ..> RegisterRequest
+
+AuthService --> UserRepository
+AuthService ..> User
+AuthService ..> JwtService
+
+JwtAuthFilter ..> JwtService
+UserDetailsServiceImpl --> UserRepository
+
+Club "1" *-- "many" ClubMember
+ClubMember ..> ClubRole
+User "1" -- "many" ClubMember
+
+@enduml
