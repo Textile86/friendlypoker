@@ -2,10 +2,9 @@ package com.friendlypoker.service;
 
 import com.friendlypoker.dto.ClubResponse;
 import com.friendlypoker.dto.CreateClubRequest;
-import com.friendlypoker.model.Club;
-import com.friendlypoker.model.ClubMember;
-import com.friendlypoker.model.ClubRole;
-import com.friendlypoker.model.User;
+import com.friendlypoker.dto.InviteResponse;
+import com.friendlypoker.model.*;
+import com.friendlypoker.repository.ClubInviteRepository;
 import com.friendlypoker.repository.ClubMemberRepository;
 import com.friendlypoker.repository.ClubRepository;
 import com.friendlypoker.repository.UserRepository;
@@ -14,7 +13,10 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
+import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
@@ -22,6 +24,7 @@ public class ClubService {
     private final UserRepository userRepository;
     private final ClubRepository clubRepository;
     private final ClubMemberRepository clubMemberRepository;
+    private final ClubInviteRepository clubInviteRepository;
 
     @Transactional
     public ClubResponse createClub(CreateClubRequest req, String ownerUsername) {
@@ -65,5 +68,52 @@ public class ClubService {
                 .orElseThrow(() -> new IllegalArgumentException("Club not found"));
 
         return ClubResponse.from(club);
+    }
+
+    @Transactional
+    public InviteResponse createInvite(Long clubId, String username) {
+        User user = userRepository.findByUsername(username)
+                .orElseThrow(() -> new IllegalStateException("User not found"));
+
+        ClubMember member = clubMemberRepository.findByClubIdAndUserId(clubId, user.getId())
+                .orElseThrow(() -> new IllegalArgumentException("You are not member of this club"));
+
+        if (member.getRole() == ClubRole.MEMBER) {
+            throw new IllegalArgumentException("Only owner or admin can create invites");
+        }
+
+        ClubInvite invite = new ClubInvite();
+        invite.setClub(member.getClub());
+        invite.setCreatedBy(user);
+        invite.setToken(UUID.randomUUID().toString());
+        invite.setExpiresAt(Instant.now().plus(7, ChronoUnit.DAYS));
+        clubInviteRepository.save(invite);
+
+        return new InviteResponse(invite.getToken());
+    }
+
+    @Transactional
+    public ClubResponse joinByInvite(String token, String username) {
+        ClubInvite invite = clubInviteRepository.findByToken(token)
+                .orElseThrow(() -> new IllegalArgumentException("Invalid invite link"));
+
+        if (invite.getExpiresAt() != null && invite.getExpiresAt().isBefore(Instant.now())) {
+            throw new IllegalArgumentException("Invite link has expired");
+        }
+
+        User user = userRepository.findByUsername(username)
+                .orElseThrow(() -> new IllegalStateException("User not found"));
+
+        if (clubMemberRepository.existsByClubIdAndUserId(invite.getClub().getId(), user.getId())) {
+            throw new IllegalArgumentException("Already a member of this club");
+        }
+
+        ClubMember membership = new ClubMember();
+        membership.setUser(user);
+        membership.setClub(invite.getClub());
+        membership.setRole(ClubRole.MEMBER);
+        clubMemberRepository.save(membership);
+
+        return ClubResponse.from(invite.getClub());
     }
 }

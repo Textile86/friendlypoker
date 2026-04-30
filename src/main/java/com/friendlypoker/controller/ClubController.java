@@ -2,6 +2,8 @@ package com.friendlypoker.controller;
 
 import com.friendlypoker.dto.ClubResponse;
 import com.friendlypoker.dto.CreateClubRequest;
+import com.friendlypoker.dto.InviteResponse;
+import com.friendlypoker.model.ClubInvite;
 import com.friendlypoker.service.ClubService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -32,8 +34,24 @@ public class ClubController {
     }
 
     @GetMapping("/{id}")
-    public ClubResponse getClub(@PathVariable Long clubId,
+    public ClubResponse getClub(@PathVariable Long id,
                                 @ AuthenticationPrincipal UserDetails user) {
-        return clubService.getClub(clubId, user.getUsername());
+        return clubService.getClub(id, user.getUsername());
+    }
+
+    @PostMapping("/{id}/invite")
+    public ResponseEntity<InviteResponse> createInvite(
+            @PathVariable Long id,
+            @AuthenticationPrincipal UserDetails user
+    ) {
+        return ResponseEntity.ok(clubService.createInvite(id, user.getUsername()));
+    }
+
+    @PostMapping("/join/{token}")
+    public ResponseEntity<ClubResponse> join(
+            @PathVariable String token,
+            @AuthenticationPrincipal UserDetails user
+    ) {
+        return ResponseEntity.ok(clubService.joinByInvite(token, user.getUsername()));
     }
 }
