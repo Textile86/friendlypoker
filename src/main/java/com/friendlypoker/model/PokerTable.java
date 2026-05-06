@@ -22,7 +22,7 @@ public class PokerTable {
     private Club club;
 
     @Column(nullable = false)
-    String name;
+    private String name;
 
     private int smallBlind;
     private int bigBlind;

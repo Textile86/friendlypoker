@@ -16,6 +16,7 @@ import java.time.Instant;
 public class Club {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @EqualsAndHashCode.Include
     private Long id;
 
     @Column(nullable = false)

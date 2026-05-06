@@ -37,6 +37,7 @@ public class TableService {
 
         PokerTable table = new PokerTable();
         table.setClub(club);
+        table.setName(req.name());
         table.setSmallBlind(req.smallBlind());
         table.setBigBlind(req.bigBlind());
         table.setMinPlayers(2);
@@ -81,6 +82,10 @@ public class TableService {
 
         if (!clubMemberRepository.existsByClubIdAndUserId(table.getClub().getId(), user.getId())) {
             throw new IllegalArgumentException("You are not member of this club");
+        }
+
+        if (seatRepository.existsByTableIdAndUserId(tableId, user.getId())) {
+            throw new IllegalArgumentException("You are already seated at this table");
         }
 
         if (table.getStatus() != TableStatus.WAITING) {

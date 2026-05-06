@@ -6,7 +6,7 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 
 public record CreateTableRequest (
-        @NotBlank @Size(min = 100) String name,
+        @NotBlank @Size(max = 100) String name,
         @Min(1) int smallBlind,
         @Min(2) int bigBlind,
         @Min(2) @Max(9) int maxPlayers,

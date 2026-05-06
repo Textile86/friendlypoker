@@ -3,7 +3,6 @@ package com.friendlypoker.controller;
 import com.friendlypoker.dto.ClubResponse;
 import com.friendlypoker.dto.CreateClubRequest;
 import com.friendlypoker.dto.InviteResponse;
-import com.friendlypoker.model.ClubInvite;
 import com.friendlypoker.service.ClubService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -35,7 +34,7 @@ public class ClubController {
 
     @GetMapping("/{id}")
     public ClubResponse getClub(@PathVariable Long id,
-                                @ AuthenticationPrincipal UserDetails user) {
+                                @AuthenticationPrincipal UserDetails user) {
         return clubService.getClub(id, user.getUsername());
     }
 
