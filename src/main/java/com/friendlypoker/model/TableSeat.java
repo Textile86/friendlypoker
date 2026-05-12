@@ -33,4 +33,6 @@ public class TableSeat {
 
     @CreationTimestamp
     private Instant joinedAt;
+
+    private int chips;
 }

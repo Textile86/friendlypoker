@@ -101,6 +101,7 @@ public class TableService {
         seat.setTable(table);
         seat.setUser(user);
         seat.setSeatIndex(nextAvailableSeat(currentSeats, table.getMaxPlayers()));
+        seat.setChips(table.getStartingChips());
         seatRepository.save(seat);
 
         currentSeats.add(seat);

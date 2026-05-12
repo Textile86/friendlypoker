@@ -1,15 +1,14 @@
 package com.friendlypoker.controller;
 
+import com.friendlypoker.dto.ActionRequest;
 import com.friendlypoker.dto.GameStateView;
 import com.friendlypoker.service.GameService;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.core.userdetails.UserDetails;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 
 @RestController
 @RequiredArgsConstructor
@@ -29,5 +28,13 @@ public class GameController {
             @PathVariable Long id,
             @AuthenticationPrincipal UserDetails user) {
         return gameService.getState(id, user.getUsername());
+    }
+
+    @PostMapping("/api/tables/{id}/action")
+    public ResponseEntity<GameStateView> action(
+            @PathVariable Long id,
+            @Valid @RequestBody ActionRequest req,
+            @AuthenticationPrincipal UserDetails user){
+        return ResponseEntity.ok(gameService.processAction(id, req, user.getUsername()));
     }
 }
