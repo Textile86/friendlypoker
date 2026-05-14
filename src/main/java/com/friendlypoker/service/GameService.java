@@ -2,6 +2,7 @@ package com.friendlypoker.service;
 
 import com.friendlypoker.dto.ActionRequest;
 import com.friendlypoker.dto.GameStateView;
+import com.friendlypoker.dto.HandHistoryResponse;
 import com.friendlypoker.engine.domain.action.GameAction;
 import com.friendlypoker.engine.domain.event.GameEvent;
 import com.friendlypoker.dto.GameEventView;
@@ -16,10 +17,7 @@ import com.friendlypoker.engine.engine.GameEngineFactory;
 import com.friendlypoker.game.GameSession;
 import com.friendlypoker.game.GameSessionManager;
 import com.friendlypoker.model.*;
-import com.friendlypoker.repository.HandHistoryRepository;
-import com.friendlypoker.repository.PokerTableRepository;
-import com.friendlypoker.repository.TableSeatRepository;
-import com.friendlypoker.repository.UserRepository;
+import com.friendlypoker.repository.*;
 import lombok.RequiredArgsConstructor;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
@@ -35,6 +33,7 @@ public class GameService {
     private final SimpMessagingTemplate messaging;
     private final UserRepository userRepository;
     private final HandHistoryRepository handHistoryRepository;
+    private final ClubMemberRepository clubMemberRepository;
 
     public GameStateView processAction(Long tableId, ActionRequest req, String username) {
         GameSession session = sessionManager.get(tableId);
@@ -94,6 +93,16 @@ public class GameService {
     public GameStateView startHand(Long tableId, String username) {
         PokerTable table = tableRepository.findById(tableId)
                 .orElseThrow(() -> new IllegalArgumentException("Table not found"));
+
+        User caller = userRepository.findByUsername(username)
+                .orElseThrow(() -> new IllegalStateException("User not found"));
+
+        ClubMember member = clubMemberRepository.findByClubIdAndUserId(table.getClub().getId(), caller.getId())
+                .orElseThrow(() -> new IllegalArgumentException("Access denied"));
+
+        if (member.getRole() == ClubRole.MEMBER) {
+            throw new IllegalArgumentException("Only owners and admins can start a hand");
+        }
 
         List<TableSeat> seats = seatRepository.findByTableId(tableId);
         if (seats.size() < table.getMinPlayers()) {
@@ -169,5 +178,21 @@ public class GameService {
                     history.setPotAmount(entry.getValue());
                     handHistoryRepository.save(history);
                 });
+    }
+
+    public List<HandHistoryResponse> getHandHistory(Long tableId, String username) {
+        PokerTable table = tableRepository.findById(tableId)
+                .orElseThrow(() -> new IllegalArgumentException("Table not found"));
+
+        User user = userRepository.findByUsername(username)
+                .orElseThrow(() -> new IllegalStateException("User not found"));
+
+        if (!clubMemberRepository.existsByClubIdAndUserId(table.getClub().getId(), user.getId())) {
+            throw new IllegalStateException("Access denied");
+        }
+
+        return handHistoryRepository.findByTableIdOrderByHandNumberAsc(tableId).stream()
+                .map(HandHistoryResponse::from)
+                .toList();
     }
 }
