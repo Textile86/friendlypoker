@@ -1,11 +1,8 @@
 package com.friendlypoker.service;
 
-import com.friendlypoker.dto.ActionRequest;
-import com.friendlypoker.dto.GameStateView;
-import com.friendlypoker.dto.HandHistoryResponse;
+import com.friendlypoker.dto.*;
 import com.friendlypoker.engine.domain.action.GameAction;
 import com.friendlypoker.engine.domain.event.GameEvent;
-import com.friendlypoker.dto.GameEventView;
 import com.friendlypoker.engine.domain.model.GameConfig;
 import com.friendlypoker.engine.domain.model.GameResult;
 import com.friendlypoker.engine.domain.model.GameState;
@@ -194,5 +191,16 @@ public class GameService {
         return handHistoryRepository.findByTableIdOrderByHandNumberAsc(tableId).stream()
                 .map(HandHistoryResponse::from)
                 .toList();
+    }
+
+    public AvailableActionResponse getAvailableActions(Long tableId, String username) {
+        GameSession session = sessionManager.get(tableId);
+        if (session == null) {
+            throw new IllegalStateException("No active game for this table");
+        }
+        User user = userRepository.findByUsername(username)
+                .orElseThrow(() -> new IllegalStateException("User not found"));
+
+        return AvailableActionResponse.fromState(session.getState(), user.getId().toString());
     }
 }

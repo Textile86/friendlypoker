@@ -1,6 +1,7 @@
 package com.friendlypoker.controller;
 
 import com.friendlypoker.dto.ActionRequest;
+import com.friendlypoker.dto.AvailableActionResponse;
 import com.friendlypoker.dto.GameStateView;
 import com.friendlypoker.dto.HandHistoryResponse;
 import com.friendlypoker.service.GameService;
@@ -46,6 +47,14 @@ public class GameController {
             @PathVariable Long id,
             @AuthenticationPrincipal UserDetails user) {
         return gameService.getHandHistory(id, user.getUsername());
+    }
+
+    @GetMapping("/api/tables/{id}/actions")
+    public AvailableActionResponse getAvailableActions(
+            @PathVariable Long id,
+            @AuthenticationPrincipal UserDetails user
+    ) {
+        return gameService.getAvailableActions(id, user.getUsername());
     }
 
 }

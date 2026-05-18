@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>FriendlyPoker — Live Demo</title>
+    <script src="https://cdn.jsdelivr.net/npm/sockjs-client@1/dist/sockjs.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/stompjs@2.3.3/lib/stomp.min.js"></script>
+    <style>
+        body { font-family: monospace; max-width: 960px; margin: 20px auto; padding: 0 20px;
+               background: #1a1a2e; color: #eee; }
+        h1   { color: #e94560; margin-bottom: 4px; }
+        .sub { color: #888; font-size: 13px; margin-bottom: 16px; }
+        .panel { background: #16213e; padding: 16px; border-radius: 8px; margin: 10px 0; }
+        .panel b { color: #a8d8ea; }
+        input  { padding: 7px 10px; margin: 4px; border-radius: 4px;
+                 border: 1px solid #444; background: #0f3460; color: #eee; }
+        button { padding: 7px 14px; margin: 4px; border-radius: 4px; border: none;
+                 background: #e94560; color: #fff; cursor: pointer; }
+        button:hover { background: #c73652; }
+        button.secondary { background: #0f3460; }
+        button.secondary:hover { background: #1a4a8a; }
+        #log   { height: 280px; overflow-y: auto; background: #0d0d1a;
+                 padding: 10px; font-size: 12px; border-radius: 4px; margin-top: 8px; }
+        #state { background: #0d0d1a; padding: 10px; font-size: 12px;
+                 white-space: pre-wrap; border-radius: 4px; margin-top: 8px;
+                 max-height: 340px; overflow-y: auto; }
+        .connected    { color: #4ecca3; }
+        .disconnected { color: #ff6b6b; }
+        .ev-HandStarted, .ev-HandFinished, .ev-PotAwarded { color: #4ecca3; font-weight: bold; }
+        .ev-BlindPosted  { color: #f6c90e; }
+        .ev-PlayerActed  { color: #a8d8ea; }
+        .ev-PlayerFolded { color: #ff6b6b; }
+        .ev-PhaseChanged { color: #c792ea; }
+        .ev-Showdown     { color: #ffcb6b; font-weight: bold; }
+        .ev-system       { color: #888; font-style: italic; }
+        .ev-error        { color: #ff6b6b; }
+    </style>
+</head>
+<body>
+
+<h1>♠ FriendlyPoker — WebSocket Live Demo</h1>
+<div class="sub">Подключись к столу и наблюдай игру в реальном времени</div>
+
+<div class="panel">
+    <b>Подключение</b><br><br>
+    <input id="serverUrl" value="http://localhost:8080" style="width:220px" placeholder="Server URL">
+    <input id="tableId" placeholder="Table ID" style="width:90px">
+    <input id="token" placeholder="JWT token (необязательно)" style="width:280px">
+    <br>
+    <button onclick="connect()">Подключиться</button>
+    <button class="secondary" onclick="disconnect()">Отключиться</button>
+    <span id="status" class="disconnected">● Отключён</span>
+</div>
+
+<div class="panel">
+    <b>События</b>
+    <button class="secondary" onclick="clearLog()"
+            style="font-size:11px;padding:3px 8px;float:right">Очистить</button>
+    <div id="log"><div class="ev-system">Ожидание подключения...</div></div>
+</div>
+
+<div class="panel">
+    <b>Текущее состояние стола</b>
+    <div id="state">Нет данных. Подключись и начни раздачу.</div>
+</div>
+
+<script>
+    let stompClient = null;
+
+    function connect() {
+        const url      = document.getElementById('serverUrl').value.trim();
+        const tableId  = document.getElementById('tableId').value.trim();
+        if (!tableId) { alert('Введи Table ID'); return; }
+
+        const socket = new SockJS(url + '/ws');
+        stompClient  = Stomp.over(socket);
+        stompClient.debug = null;
+
+        const headers = {};
+
+        stompClient.connect(headers, function () {
+            setStatus(true);
+            logEvent('system', 'Подключён к ' + url + ' (стол #' + tableId + ')');
+
+            stompClient.subscribe('/topic/tables/' + tableId + '/state', function (msg) {
+                const state = JSON.parse(msg.body);
+                document.getElementById('state').textContent = JSON.stringify(state, null, 2);
+            });
+
+            stompClient.subscribe('/topic/tables/' + tableId + '/events', function (msg) {
+                const ev = JSON.parse(msg.body);
+                logEvent(ev.type || 'unknown', JSON.stringify(ev.data || ev, null, 0));
+            });
+
+        }, function (err) {
+            setStatus(false);
+            logEvent('error', 'Ошибка подключения: ' + err);
+        });
+    }
+
+    function disconnect() {
+        if (stompClient) { stompClient.disconnect(); stompClient = null; }
+        setStatus(false);
+        logEvent('system', 'Отключён');
+    }
+
+    function setStatus(connected) {
+        const el = document.getElementById('status');
+        el.textContent  = connected ? '● Подключён' : '● Отключён';
+        el.className    = connected ? 'connected'   : 'disconnected';
+    }
+
+    function logEvent(type, message) {
+        const log  = document.getElementById('log');
+        const time = new Date().toLocaleTimeString();
+        const div  = document.createElement('div');
+        div.className   = 'ev-' + type;
+        div.textContent = '[' + time + '] ' + type + ' → ' + message;
+        log.appendChild(div);
+        log.scrollTop = log.scrollHeight;
+    }
+
+    function clearLog() {
+        document.getElementById('log').innerHTML = '';
+    }
+</script>
+
+</body>
+</html>
