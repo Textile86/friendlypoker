@@ -17,11 +17,12 @@ services:
     depends_on:
       - postgres
     environment:
-      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/friendlypoker
-      SPRING_DATASOURCE_USERNAME: poker
-      SPRING_DATASOURCE_PASSWORD: poker
-      APP_JWT_SECRET: eW91ci0yNTYtYml0LXNlY3JldC1jaGFuZ2UtaW4tcHJvZC1wbGVhc2UtZG8taXQ=
-      APP_JWT_EXPIRATION_MS: 86400000
+      SPRING_PROFILES_ACTIVE: prod
+      DB_URL: jdbc:postgresql://postgres:5432/friendlypoker
+      DB_USER: poker
+      DB_PASSWORD: poker
+      JWT_SECRET: eW91ci0yNTYtYml0LXNlY3JldC1jaGFuZ2UtaW4tcHJvZC1wbGVhc2UtZG8taXQ=
+      JWT_EXPIRATION_MS: 86400000
 
 volumes:
   pgdata:

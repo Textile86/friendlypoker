@@ -18,6 +18,7 @@ import com.friendlypoker.repository.*;
 import lombok.RequiredArgsConstructor;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 
@@ -32,6 +33,7 @@ public class GameService {
     private final HandHistoryRepository handHistoryRepository;
     private final ClubMemberRepository clubMemberRepository;
 
+    @Transactional
     public GameStateView processAction(Long tableId, ActionRequest req, String username) {
         GameSession session = sessionManager.get(tableId);
         if (session == null) {
@@ -87,6 +89,7 @@ public class GameService {
         sessionManager.remove(tableId);
     }
 
+    @Transactional
     public GameStateView startHand(Long tableId, String username) {
         PokerTable table = tableRepository.findById(tableId)
                 .orElseThrow(() -> new IllegalArgumentException("Table not found"));
@@ -141,6 +144,7 @@ public class GameService {
         return GameStateView.from(tableId, result.newState(), null);
     }
 
+    @Transactional(readOnly = true)
     public GameStateView getState(Long tableId, String username) {
         GameSession session = sessionManager.get(tableId);
         if (session == null) {
@@ -177,6 +181,7 @@ public class GameService {
                 });
     }
 
+    @Transactional(readOnly = true)
     public List<HandHistoryResponse> getHandHistory(Long tableId, String username) {
         PokerTable table = tableRepository.findById(tableId)
                 .orElseThrow(() -> new IllegalArgumentException("Table not found"));
@@ -193,6 +198,7 @@ public class GameService {
                 .toList();
     }
 
+    @Transactional(readOnly = true)
     public AvailableActionResponse getAvailableActions(Long tableId, String username) {
         GameSession session = sessionManager.get(tableId);
         if (session == null) {
