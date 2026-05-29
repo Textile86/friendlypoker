@@ -56,6 +56,17 @@ public class AuthControllerTest {
     }
 
     @Test
+    @DisplayName("POST /register with blank username returns 400")
+    void register_blankUsername_returns400() throws Exception {
+        mvc.perform(post("/api/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"username":"","email":"alice@test.com","password":"secret123"}
+                                """))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
     @DisplayName("POST /register with invalid email returns 400")
     void register_invalidEmail_returns400() throws Exception {
         mvc.perform(post("/api/auth/register")

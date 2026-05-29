@@ -155,7 +155,7 @@ public class GameEngineImpl implements GameEngine {
         }
 
         int current = state.dealerIndex();
-        for (int i = 0; i <= size; i++) {
+        for (int i = 1; i <= size; i++) {
             int candidate = (current + i) % size;
             if (state.players().get(candidate).chips() > 0) {
                 return candidate;
