@@ -21,15 +21,24 @@ public abstract class AbstractBettingPhaseHandler implements PhaseHandler {
 
     @Override
     public GameResult handle(GameState state, GameAction action) {
-        GameResult result = BettingRoundHandler.applyAction(state, action);
-        GameState next = result.newState();
-        List<GameEvent> events = new ArrayList<>(result.events());
+
+        GameState next = state;
+        List<GameEvent> events = new ArrayList<>();
+
+        if (action != null) {
+            GameResult result = BettingRoundHandler.applyAction(state, action);
+            next = result.newState();
+            events.addAll(result.events());
+        }
+
         if (next.isOnlyOnePlayerLeft()) {
             return handleLastPlayerStanding(next, events);
         }
+
         if (next.isBettingRoundComplete()) {
             return advancePhase(next, events);
         }
+
         return GameResult.of(next, events);
     }
 

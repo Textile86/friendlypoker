@@ -19,7 +19,7 @@ public final class ActionValidator {
                     .formatted(action.playerId(), current.id()));
         }
 
-        if (!current.status().canAnt()) {
+        if (!current.status().canAct()) {
             throw new IllegalArgumentException("Player %s cannot act - status is %s"
                     .formatted(action.playerId(), current.status()));
         }

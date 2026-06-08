@@ -11,7 +11,7 @@ public enum PlayerStatus {
         return this == ACTIVE || this == ALL_IN;
     }
 
-    public boolean canAnt() {
+    public boolean canAct() {
         return this == ACTIVE;
     }
 }

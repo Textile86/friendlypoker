@@ -5,6 +5,7 @@ spring:
     password: ${DB_PASSWORD}
   jpa:
     show-sql: false
+    open-in-view: false
 
 app:
   jwt:

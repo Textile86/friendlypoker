@@ -127,9 +127,7 @@ public class GameEngineImpl implements GameEngine {
         GameResult result = handler.handle(state, action);
 
         // Auto-resolve phases that require no player input (e.g., SHOWDOWN)
-        while (!result.newState().phase().isBettingPhase()
-                && result.newState().phase() != GamePhase.FINISHED
-                && result.newState().phase() != GamePhase.WAITING) {
+        while (shoudAutoResolve(result.newState())) {
             PhaseHandler next = findHandler(result.newState().phase());
             GameResult resolved = next.handle(result.newState(), null);
             List<GameEvent> merged = new ArrayList<>(result.events());
@@ -138,6 +136,21 @@ public class GameEngineImpl implements GameEngine {
         }
 
         return result;
+    }
+
+    private boolean shoudAutoResolve(GameState state) {
+        if (state.phase() == GamePhase.FINISHED || state.phase() == GamePhase.WAITING) {
+            return false;
+        }
+
+        if (state.phase().isBettingPhase()) {
+            return true;
+        }
+
+        boolean someoneCanAct = state.players().stream()
+                .anyMatch(p -> p.status().canAct() && p.chips() > 0);
+
+        return !someoneCanAct;
     }
 
     private PhaseHandler findHandler(GamePhase phase) {

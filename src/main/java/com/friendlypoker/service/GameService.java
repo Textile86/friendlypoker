@@ -11,6 +11,7 @@ import com.friendlypoker.engine.domain.model.enums.ActionType;
 import com.friendlypoker.engine.domain.model.enums.GamePhase;
 import com.friendlypoker.engine.engine.GameEngine;
 import com.friendlypoker.engine.engine.GameEngineFactory;
+import com.friendlypoker.game.GameLogger;
 import com.friendlypoker.game.GameSession;
 import com.friendlypoker.game.GameSessionManager;
 import com.friendlypoker.model.*;
@@ -55,6 +56,9 @@ public class GameService {
         };
 
         GameResult result = session.processAction(action);
+
+        GameLogger.logAction(tableId, playerId, req.type(), req.amount());
+        GameLogger.logResult(tableId, result);
 
         if (result.newState().phase() == GamePhase.FINISHED) {
             finishGame(tableId, result);
@@ -137,11 +141,14 @@ public class GameService {
 
         GameResult result = session.startHand();
 
+        GameLogger.logStartHand(tableId, result.newState());
+        GameLogger.logResult(tableId, result);
+
         table.setStatus(TableStatus.ACTIVE);
         tableRepository.save(table);
 
         broadcast(tableId, result);
-        return GameStateView.from(tableId, result.newState(), null);
+        return GameStateView.from(tableId, result.newState(), caller.getId().toString());
     }
 
     @Transactional(readOnly = true)

@@ -40,3 +40,6 @@ export const sitDown = (tableId: number) =>
 
 export const standUp = (tableId: number) =>
   api.delete(`/tables/${tableId}/sit`)
+
+export const getTable = (tableId: number) =>
+  api.get<TableResponse>(`/tables/${tableId}`).then((r) => r.data)

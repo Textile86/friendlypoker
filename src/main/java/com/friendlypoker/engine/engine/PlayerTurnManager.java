@@ -16,7 +16,7 @@ public final class PlayerTurnManager {
 
         for (int i = 0; i < size; i++) {
             int idx = (start + i) % size;
-            if (players.get(idx).status().canAnt()) {
+            if (players.get(idx).status().canAct()) {
                 return state.withCurrentPlayerIndex(idx);
             }
         }
@@ -35,7 +35,7 @@ public final class PlayerTurnManager {
 
         for (int i = 0; i < size; i++) {
             int idx = (start + i) % size;
-            if (players.get(idx).status().canAnt()) {
+            if (players.get(idx).status().canAct()) {
                 return idx;
             }
         }

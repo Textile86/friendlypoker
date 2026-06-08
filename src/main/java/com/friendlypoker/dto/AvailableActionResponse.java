@@ -2,6 +2,7 @@ package com.friendlypoker.dto;
 
 import com.friendlypoker.engine.domain.model.GameState;
 import com.friendlypoker.engine.domain.model.PlayerState;
+import com.friendlypoker.engine.domain.model.enums.PlayerStatus;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -19,6 +20,11 @@ public record AvailableActionResponse(
         }
 
         PlayerState current = state.currentPlayer();
+
+        if (current.status() == PlayerStatus.ALL_IN) {
+            return new AvailableActionResponse(false, null, List.of());
+        }
+
         boolean youTurn = current.id().equals(playerId);
 
         if(!youTurn) {

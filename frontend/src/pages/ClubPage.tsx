@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { useParams, useNavigate } from 'react-router-dom'
 import Navbar from '../components/Navbar'
 import { useAuth } from '../context/AuthContext'
 import { getMyClubs, createInvite, ClubResponse } from '../api/clubs'
@@ -9,6 +9,7 @@ export default function ClubPage() {
   const { id } = useParams<{ id: string }>()
   const clubId = Number(id)
   const { username } = useAuth()
+  const navigate = useNavigate()
 
   const [club, setClub] = useState<ClubResponse | null>(null)
   const [tables, setTables] = useState<TableResponse[]>([])
@@ -234,12 +235,20 @@ export default function ClubPage() {
                           {table.status}
                         </span>
                         {isSeated ? (
-                          <button
-                            onClick={() => handleStand(table.id)}
-                            className="bg-red-700 hover:bg-red-600 text-sm px-3 py-1 rounded-lg transition"
-                          >
-                            Stand Up
-                          </button>
+                          <>
+                            <button
+                              onClick={() => navigate(`/game/${table.id}`)}
+                              className="bg-blue-600 hover:bg-blue-500 text-sm px-3 py-1 rounded-lg transition font-semibold"
+                            >
+                              ▶ Play
+                            </button>
+                            <button
+                              onClick={() => handleStand(table.id)}
+                              className="bg-red-700 hover:bg-red-600 text-sm px-3 py-1 rounded-lg transition"
+                            >
+                              Stand Up
+                            </button>
+                          </>
                         ) : (
                           isWaiting && !isFull && (
                             <button

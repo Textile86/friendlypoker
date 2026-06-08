@@ -43,7 +43,7 @@ public record GameState(
 
     public List<PlayerState> playersWhoCanAct() {
         return players.stream()
-                .filter(p -> p.status().canAnt())
+                .filter(p -> p.status().canAct())
                 .toList();
     }
 
