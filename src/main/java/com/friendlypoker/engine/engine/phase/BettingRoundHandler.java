@@ -51,6 +51,9 @@ public final class BettingRoundHandler {
                 player.chips()
         );
         PlayerState updated = player.placeBet(callAmount).markActed();
+        if (updated.chips() == 0) {
+            updated = updated.withStatus(PlayerStatus.ALL_IN);
+        }
         Pot updatedPot = state.pot().addToMain(callAmount);
         events.add(new GameEvent.PlayerActed(
                 state.tableId(), action.playerId(), ActionType.CALL, callAmount, updated.chips()));

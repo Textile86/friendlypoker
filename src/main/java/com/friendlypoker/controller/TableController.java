@@ -1,22 +1,28 @@
 package com.friendlypoker.controller;
 
 import com.friendlypoker.dto.CreateTableRequest;
+import com.friendlypoker.dto.GameEventView;
 import com.friendlypoker.dto.TableResponse;
+import com.friendlypoker.service.GameService;
 import com.friendlypoker.service.TableService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
+import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequiredArgsConstructor
 public class TableController {
 
     private final TableService tableService;
+    private final GameService gameService;
+    private final SimpMessagingTemplate messaging;
 
     @PostMapping("/api/clubs/{clubId}/tables")
     public ResponseEntity<TableResponse> create(
@@ -44,14 +50,20 @@ public class TableController {
     public ResponseEntity<TableResponse> sit(
             @PathVariable Long id,
             @AuthenticationPrincipal UserDetails user) {
-        return ResponseEntity.ok(tableService.sitDown(id, user.getUsername()));
+        TableResponse result = tableService.sitDown(id, user.getUsername());
+        // broadcast AFTER transaction commits so other clients see the new seat immediately
+        messaging.convertAndSend("/topic/tables/" + id + "/events",
+                new GameEventView("SeatsChanged", Map.of("tableId", id)));
+        return ResponseEntity.ok(result);
     }
 
     @DeleteMapping("/api/tables/{id}/sit")
     public ResponseEntity<Void> standUp(
             @PathVariable Long id,
             @AuthenticationPrincipal UserDetails user) {
-        tableService.standUp(id, user.getUsername());
+        gameService.leaveTable(id, user.getUsername());
+        messaging.convertAndSend("/topic/tables/" + id + "/events",
+                new GameEventView("SeatsChanged", Map.of("tableId", id)));
         return ResponseEntity.noContent().build();
     }
 }

@@ -67,3 +67,46 @@ Desktop.ini
 application.properties.local
 application.yml.local
 secrets.properties
+
+# AI assistant history (Claude / Cline / etc.)
+.specstory/
+.claude/
+.clinerules
+CODEBUDDY.md
+
+# Test / debug / stress scripts (keep only in local dev)
+auto_test.sh
+register_test.sh
+run_stress_test.sh
+test_action.sh
+test_action_simple.sh
+stress_test.py
+stress_test_v3.py
+stress_test_v4.py
+analyze_v4.sh
+cat_rules.sh
+ls_docs.sh
+debug_api.sh
+debug_invite.py
+debug_invite2.sh
+clear_db.sh
+clear_db.sql
+ping_test.sh
+test_api.sh
+check_env.sh
+три_топора.sh
+
+# Docs — keep only the master report, ignore the rest
+docs/*
+!docs/ИТОГОВЫЙ_ОТЧЁТ_Для_НовогоЧата.md
+
+# Logs (already covered by *.log, but be explicit)
+logs/
+*.log
+/tmp/
+
+# Archives / temp
+*.tmp
+*.bak
+*.zip
+*.tar.gz

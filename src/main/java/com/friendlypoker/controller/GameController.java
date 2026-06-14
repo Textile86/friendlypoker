@@ -57,4 +57,35 @@ public class GameController {
         return gameService.getAvailableActions(id, user.getUsername());
     }
 
+    @PostMapping("/api/tables/{id}/close")
+    public ResponseEntity<Void> closeTable(
+            @PathVariable Long id,
+            @AuthenticationPrincipal UserDetails user) {
+        gameService.closeTable(id, user.getUsername());
+        return ResponseEntity.noContent().build();
+    }
+
+    @PostMapping("/api/tables/{id}/sit-out")
+    public ResponseEntity<Void> sitOut(
+            @PathVariable Long id,
+            @AuthenticationPrincipal UserDetails user) {
+        gameService.sitOut(id, user.getUsername());
+        return ResponseEntity.noContent().build();
+    }
+
+    @PostMapping("/api/tables/{id}/im-back")
+    public ResponseEntity<Void> imBack(
+            @PathVariable Long id,
+            @AuthenticationPrincipal UserDetails user) {
+        gameService.imBack(id, user.getUsername());
+        return ResponseEntity.noContent().build();
+    }
+
+    @PostMapping("/api/tables/{id}/show-cards")
+    public ResponseEntity<Void> showCards(
+            @PathVariable Long id,
+            @AuthenticationPrincipal UserDetails user) {
+        gameService.showCards(id, user.getUsername());
+        return ResponseEntity.noContent().build();
+    }
 }

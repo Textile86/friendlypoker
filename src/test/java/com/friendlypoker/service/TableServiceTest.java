@@ -14,6 +14,7 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -52,8 +53,10 @@ class TableServiceTest {
 
         when(userRepository.findByUsername("alice")).thenReturn(Optional.of(user));
         when(tableRepository.findById(1L)).thenReturn(Optional.of(table));
-        when(clubMemberRepository.existsByClubIdAndUserId(1L, 1L)).thenReturn(true);
-        when(seatRepository.existsByTableIdAndUserId(1L, 1L)).thenReturn(false);
+        ClubMember member = new ClubMember();
+        member.setRole(ClubRole.MEMBER); // или нужная роль
+        when(clubMemberRepository.findByClubIdAndUserId(anyLong(), anyLong()))
+                .thenReturn(Optional.of(member));
 
         assertThatThrownBy(() -> tableService.sitDown(1L, "alice"))
                 .isInstanceOf(IllegalArgumentException.class)

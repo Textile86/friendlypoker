@@ -68,7 +68,7 @@ public class ShowdownHandler implements PhaseHandler {
                 state.tableId(), state.handNumber(), deltas
         ));
 
-        next = next.withPhase(GamePhase.FINISHED);
+        next = next.withPhase(GamePhase.FINISHED).withPot(Pot.empty());
         return GameResult.of(next, events);
 
     }

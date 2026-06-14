@@ -7,66 +7,117 @@ import com.friendlypoker.engine.domain.model.PlayerState;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.StandardOpenOption;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /**
- * Centralised game event logger for debugging.
- * Logs every state change, action, and event during a poker hand.
+ * All logging is fire-and-forget: every method returns immediately and the
+ * actual I/O (SLF4J → Docker stdout AND file append) happens on a single
+ * daemon thread so it never blocks a Tomcat request thread.
  */
 public class GameLogger {
 
     private static final Logger log = LoggerFactory.getLogger(GameLogger.class);
+    private static final String LOG_DIR = "/app/logs";
+    private static final DateTimeFormatter FMT = DateTimeFormatter.ofPattern("HH:mm:ss.SSS");
+
+    private static final ExecutorService WRITER = Executors.newSingleThreadExecutor(r -> {
+        Thread t = new Thread(r, "game-logger");
+        t.setDaemon(true);
+        return t;
+    });
+    private static volatile boolean dirReady = false;
+
+    // ── public API — all fire-and-forget ─────────────────────────────────────
 
     public static void logStartHand(Long tableId, GameState state) {
-        log.info("━━━ TABLE {} HAND #{} STARTED ━━━", tableId, state.handNumber());
-        logPlayers(tableId, state.players(), "INITIAL");
-        log.info("[TABLE {}] Phase: {}, DealerIdx: {}", tableId, state.phase(), state.dealerIndex());
+        long hand = state.handNumber();
+        int dealer = state.dealerIndex();
+        String phase = state.phase().name();
+        List<PlayerState> players = state.players();
+        WRITER.submit(() -> {
+            log.info("━━━ TABLE {} HAND #{} STARTED ━━━ dealer={} phase={}", tableId, hand, dealer, phase);
+            StringBuilder sb = new StringBuilder();
+            sb.append(ts()).append("═══ HAND #").append(hand).append(" STARTED  dealer=").append(dealer).append('\n');
+            for (PlayerState p : players) {
+                sb.append(ts()).append("  SEAT seat=").append(p.seatIndex())
+                        .append(" id=").append(p.id())
+                        .append(" chips=").append(p.chips())
+                        .append(" status=").append(p.status()).append('\n');
+            }
+            writeFile(tableId, sb.toString());
+        });
     }
 
     public static void logAction(Long tableId, String playerId, String actionType, int amount) {
-        log.info("[TABLE {}] ▶ ACTION: player={} type={} amount={}", tableId, playerId, actionType, amount);
+        WRITER.submit(() -> {
+            log.info("[TABLE {}] ACTION player={} type={} amount={}", tableId, playerId, actionType, amount);
+            writeFile(tableId, ts() + "ACTION player=" + playerId
+                    + " type=" + actionType + " amount=" + amount + '\n');
+        });
     }
 
     public static void logResult(Long tableId, GameResult result) {
         GameState state = result.newState();
-        log.info("[TABLE {}] Phase after action: {}", tableId, state.phase());
-        logPlayers(tableId, state.players(), "AFTER_ACTION");
-        logEvents(tableId, result.events());
-        logBettingStatus(tableId, state);
+        String phase = state.phase().name();
+        int currentIdx = state.currentPlayerIndex();
+        int pot = state.pot().total();
+        List<PlayerState> players = state.players();
+        List<GameEvent> events = result.events();
+        WRITER.submit(() -> {
+            log.info("[TABLE {}] → phase={} currentIdx={} pot={}", tableId, phase, currentIdx, pot);
+            StringBuilder sb = new StringBuilder();
+            sb.append(ts()).append("  → phase=").append(phase)
+                    .append(" currentIdx=").append(currentIdx)
+                    .append(" pot=").append(pot).append('\n');
+            for (PlayerState p : players) {
+                log.info("[TABLE {}]   seat={} id={} chips={} bet={} status={}",
+                        tableId, p.seatIndex(), p.id(), p.chips(), p.currentBet(), p.status());
+                sb.append(ts()).append("  PLAYER seat=").append(p.seatIndex())
+                        .append(" id=").append(p.id())
+                        .append(" chips=").append(p.chips())
+                        .append(" bet=").append(p.currentBet())
+                        .append(" status=").append(p.status()).append('\n');
+            }
+            for (GameEvent e : events) {
+                sb.append(ts()).append("  EVENT ").append(e.getClass().getSimpleName()).append('\n');
+            }
+            writeFile(tableId, sb.toString());
+        });
     }
 
     public static void logAutoResolve(Long tableId, GameState before, GameResult result) {
-        log.info("[TABLE {}] ⚡ AUTO-RESOLVE: {} → {}", tableId, before.phase(), result.newState().phase());
-        logPlayers(tableId, result.newState().players(), "AUTO_RESOLVE");
+        String from = before.phase().name();
+        String to = result.newState().phase().name();
+        WRITER.submit(() -> {
+            log.info("[TABLE {}] AUTO-RESOLVE {} → {}", tableId, from, to);
+            writeFile(tableId, ts() + "AUTO-RESOLVE " + from + " → " + to + '\n');
+        });
     }
 
-    private static void logPlayers(Long tableId, List<PlayerState> players, String tag) {
-        for (PlayerState p : players) {
-            log.info("[TABLE {}] [{}] seat={} id={} status={} chips={} bet={} acted={}",
-                    tableId, tag, p.seatIndex(), p.id(), p.status(), p.chips(),
-                    p.currentBet(), p.hasActedThisRound());
-        }
+    // ── internal ─────────────────────────────────────────────────────────────
+
+    private static String ts() {
+        return LocalDateTime.now().format(FMT) + " ";
     }
 
-    private static void logEvents(Long tableId, List<GameEvent> events) {
-        for (GameEvent e : events) {
-            log.info("[TABLE {}] 📨 EVENT: {}", tableId, e.getClass().getSimpleName());
-        }
-    }
-
-    private static void logBettingStatus(Long tableId, GameState state) {
-        if (!state.phase().isBettingPhase()) return;
-        boolean roundComplete = state.isBettingRoundComplete();
-        log.info("[TABLE {}] Betting round complete: {}", tableId, roundComplete);
-        if (!roundComplete) {
-            int next = state.currentPlayerIndex();
-            PlayerState nextPlayer = next >= 0 && next < state.players().size()
-                    ? state.players().get(next) : null;
-            log.info("[TABLE {}] Next to act: seat={} id={} status={}",
-                    tableId,
-                    nextPlayer != null ? nextPlayer.seatIndex() : "?",
-                    nextPlayer != null ? nextPlayer.id() : "?",
-                    nextPlayer != null ? nextPlayer.status() : "?");
+    private static void writeFile(Long tableId, String content) {
+        try {
+            if (!dirReady) {
+                Files.createDirectories(Paths.get(LOG_DIR));
+                dirReady = true;
+            }
+            Path file = Paths.get(LOG_DIR).resolve("table-" + tableId + ".log");
+            Files.writeString(file, content, StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+        } catch (IOException ignored) {
         }
     }
 }

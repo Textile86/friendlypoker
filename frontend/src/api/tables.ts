@@ -8,6 +8,9 @@ export interface SeatInfo {
 
 export interface TableResponse {
   id: number
+  // clubId and myRole appear after the backend TableResponse update;
+  // optional so the UI works against the old backend too
+  clubId?: number
   name: string
   smallBlind: number
   bigBlind: number
@@ -17,6 +20,7 @@ export interface TableResponse {
   actionTimeoutSecs: number
   variant: string
   status: string
+  myRole?: string
   seats: SeatInfo[]
 }
 
@@ -43,3 +47,15 @@ export const standUp = (tableId: number) =>
 
 export const getTable = (tableId: number) =>
   api.get<TableResponse>(`/tables/${tableId}`).then((r) => r.data)
+
+export const closeTable = (tableId: number) =>
+  api.post(`/tables/${tableId}/close`)
+
+export const sitOut = (tableId: number) =>
+  api.post(`/tables/${tableId}/sit-out`)
+
+export const imBack = (tableId: number) =>
+  api.post(`/tables/${tableId}/im-back`)
+
+export const showCards = (tableId: number) =>
+  api.post(`/tables/${tableId}/show-cards`)

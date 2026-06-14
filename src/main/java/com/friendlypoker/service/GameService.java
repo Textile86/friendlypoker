@@ -22,6 +22,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -34,17 +37,23 @@ public class GameService {
     private final HandHistoryRepository handHistoryRepository;
     private final ClubMemberRepository clubMemberRepository;
 
-    @Transactional
     public GameStateView processAction(Long tableId, ActionRequest req, String username) {
         GameSession session = sessionManager.get(tableId);
         if (session == null) {
             throw new IllegalStateException("No active game at this table");
         }
 
-        User user = userRepository.findByUsername(username)
-                .orElseThrow(() -> new IllegalStateException("User not found"));
+        // Reject actions when hand is not in a betting phase
+        if (!session.getState().phase().isBettingPhase()) {
+            throw new IllegalStateException("No active hand in progress");
+        }
 
-        String playerId = user.getId().toString();
+        // Resolve player ID from in-memory session state — no DB call needed
+        String playerId = playerIdInSession(session.getState(), username);
+        if (playerId == null) {
+            throw new IllegalStateException("You are not seated in this game");
+        }
+
         ActionType type = ActionType.valueOf(req.type().toUpperCase());
 
         GameAction action = switch (type) {
@@ -60,15 +69,20 @@ public class GameService {
         GameLogger.logAction(tableId, playerId, req.type(), req.amount());
         GameLogger.logResult(tableId, result);
 
-        if (result.newState().phase() == GamePhase.FINISHED) {
-            finishGame(tableId, result);
-        }
+        boolean finished = result.newState().phase() == GamePhase.FINISHED;
 
         broadcast(tableId, result);
+
+        if (finished) {
+            finishGame(tableId, result);
+            // Keep session alive in FINISHED state so startHand can rotate dealer correctly
+        }
+
         return GameStateView.from(tableId, result.newState(), playerId);
     }
 
-    private void finishGame(Long tableId, GameResult result) {
+    @Transactional
+    public void finishGame(Long tableId, GameResult result) {
         GameState finalState = result.newState();
 
         result.events().stream()
@@ -90,13 +104,16 @@ public class GameService {
             t.setStatus(TableStatus.WAITING);
             tableRepository.save(t);
         });
-        sessionManager.remove(tableId);
     }
 
     @Transactional
     public GameStateView startHand(Long tableId, String username) {
         PokerTable table = tableRepository.findById(tableId)
                 .orElseThrow(() -> new IllegalArgumentException("Table not found"));
+
+        if (table.getStatus() == TableStatus.CLOSED) {
+            throw new IllegalStateException("Table is closed");
+        }
 
         User caller = userRepository.findByUsername(username)
                 .orElseThrow(() -> new IllegalStateException("User not found"));
@@ -111,6 +128,36 @@ public class GameService {
         List<TableSeat> seats = seatRepository.findByTableId(tableId);
         if (seats.size() < table.getMinPlayers()) {
             throw new IllegalStateException("Not enough players");
+        }
+
+        // Reuse FINISHED session for dealer rotation — but only when players haven't changed
+        GameSession existingSession = sessionManager.get(tableId);
+        if (existingSession != null && existingSession.getState().phase() == GamePhase.FINISHED) {
+            GameState existingState = existingSession.getState();
+            Set<String> seatIds = seats.stream()
+                    .map(s -> s.getUser().getId().toString())
+                    .collect(Collectors.toSet());
+            Set<String> sessionPlayerIds = existingState.players().stream()
+                    .map(PlayerState::id)
+                    .collect(Collectors.toSet());
+
+            if (seatIds.equals(sessionPlayerIds)) {
+                // Same players — sync chips from DB and reuse (dealer index rotates correctly)
+                for (TableSeat seat : seats) {
+                    String pid = seat.getUser().getId().toString();
+                    existingState.findPlayer(pid).ifPresent(p ->
+                            existingSession.setState(existingSession.getState().replacePlayer(p.withChips(seat.getChips())))
+                    );
+                }
+                GameResult result = existingSession.startHand();
+                GameLogger.logStartHand(tableId, result.newState());
+                GameLogger.logResult(tableId, result);
+                table.setStatus(TableStatus.ACTIVE);
+                tableRepository.save(table);
+                broadcast(tableId, result);
+                return GameStateView.from(tableId, result.newState(), caller.getId().toString());
+            }
+            // Players changed — fall through to fresh session
         }
 
         GameConfig config = new GameConfig(
@@ -136,6 +183,7 @@ public class GameService {
             state = state.replacePlayer(p.withChips(seat.getChips()));
         }
 
+        sessionManager.remove(tableId);
         GameSession session = new GameSession(engine, state);
         sessionManager.getOrCreate(tableId, session);
 
@@ -151,15 +199,23 @@ public class GameService {
         return GameStateView.from(tableId, result.newState(), caller.getId().toString());
     }
 
-    @Transactional(readOnly = true)
     public GameStateView getState(Long tableId, String username) {
         GameSession session = sessionManager.get(tableId);
         if (session == null) {
             throw new IllegalStateException("No active game at this table");
         }
-        User user = userRepository.findByUsername(username)
-                .orElseThrow(() -> new IllegalStateException("User not found"));
-        return GameStateView.from(tableId, session.getState(), user.getId().toString());
+        GameLogger.logAction(tableId, username, "getState", 0);
+        String playerId = playerIdInSession(session.getState(), username);
+        return GameStateView.from(tableId, session.getState(), playerId);
+    }
+
+    /** Returns the player's DB-string-ID by matching their display name (username), null if not in game. */
+    private String playerIdInSession(GameState state, String username) {
+        return state.players().stream()
+                .filter(p -> username.equals(p.displayName()))
+                .map(PlayerState::id)
+                .findFirst()
+                .orElse(null);
     }
 
     private void broadcast(Long tableId, GameResult result) {
@@ -205,15 +261,100 @@ public class GameService {
                 .toList();
     }
 
-    @Transactional(readOnly = true)
     public AvailableActionResponse getAvailableActions(Long tableId, String username) {
         GameSession session = sessionManager.get(tableId);
         if (session == null) {
             throw new IllegalStateException("No active game for this table");
         }
+        // Look up player ID from in-memory session — no DB call, no transaction needed
+        String playerId = playerIdInSession(session.getState(), username);
+        return AvailableActionResponse.fromState(session.getState(), playerId);
+    }
+
+    @Transactional
+    public void leaveTable(Long tableId, String username) {
         User user = userRepository.findByUsername(username)
                 .orElseThrow(() -> new IllegalStateException("User not found"));
 
-        return AvailableActionResponse.fromState(session.getState(), user.getId().toString());
+        TableSeat seat = seatRepository.findByTableIdAndUserId(tableId, user.getId())
+                .orElseThrow(() -> new IllegalArgumentException("You are not seated at this table"));
+
+        GameSession session = sessionManager.get(tableId);
+        if (session != null) {
+            GameResult result = session.leavePlayer(user.getId().toString());
+            boolean finished = result.newState().phase() == GamePhase.FINISHED;
+            if (finished) {
+                finishGame(tableId, result);
+                // Keep session alive — next startHand will detect player mismatch and do a fresh start
+            }
+            broadcast(tableId, result);
+        }
+
+        seatRepository.delete(seat);
+    }
+
+    @Transactional
+    public void closeTable(Long tableId, String username) {
+        PokerTable table = tableRepository.findById(tableId)
+                .orElseThrow(() -> new IllegalArgumentException("Table not found"));
+
+        User user = userRepository.findByUsername(username)
+                .orElseThrow(() -> new IllegalStateException("User not found"));
+
+        ClubMember member = clubMemberRepository.findByClubIdAndUserId(table.getClub().getId(), user.getId())
+                .orElseThrow(() -> new IllegalArgumentException("Access denied"));
+
+        if (member.getRole() == ClubRole.MEMBER) {
+            throw new IllegalArgumentException("Only owners and admins can close the table");
+        }
+
+        sessionManager.remove(tableId);
+
+        table.setStatus(TableStatus.CLOSED);
+        tableRepository.save(table);
+
+        messaging.convertAndSend(
+                "/topic/tables/" + tableId + "/events",
+                new GameEventView("TableClosed", Map.of("tableId", tableId))
+        );
+    }
+
+    public void sitOut(Long tableId, String username) {
+        GameSession session = sessionManager.get(tableId);
+        if (session == null) return;
+        User user = userRepository.findByUsername(username)
+                .orElseThrow(() -> new IllegalStateException("User not found"));
+        session.sitOut(user.getId().toString());
+    }
+
+    public void imBack(Long tableId, String username) {
+        GameSession session = sessionManager.get(tableId);
+        if (session == null) return;
+        User user = userRepository.findByUsername(username)
+                .orElseThrow(() -> new IllegalStateException("User not found"));
+        session.imBack(user.getId().toString());
+    }
+
+    public void showCards(Long tableId, String username) {
+        GameSession session = sessionManager.get(tableId);
+        if (session == null) return;
+        User user = userRepository.findByUsername(username)
+                .orElseThrow(() -> new IllegalStateException("User not found"));
+        String playerId = user.getId().toString();
+        GameState state = session.getState();
+        state.findPlayer(playerId).ifPresent(player -> {
+            if (player.holeCards() == null || player.holeCards().isEmpty()) return;
+            List<GameStateView.CardView> cards = player.holeCards().stream()
+                    .map(GameStateView.CardView::from)
+                    .toList();
+            messaging.convertAndSend(
+                    "/topic/tables/" + tableId + "/events",
+                    new GameEventView("CardsShown", Map.of(
+                            "playerId", playerId,
+                            "displayName", player.displayName(),
+                            "cards", cards
+                    ))
+            );
+        });
     }
 }

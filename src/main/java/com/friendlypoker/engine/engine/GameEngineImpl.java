@@ -80,8 +80,9 @@ public class GameEngineImpl implements GameEngine {
 
     @Override
     public GameResult startHand(GameState state) {
-        if (state.players().size() < state.config().minPlayers()) {
-            throw new IllegalStateException("Not enough players to start hand");
+        long activeCount = state.players().stream().filter(p -> p.chips() > 0).count();
+        if (activeCount < state.config().minPlayers()) {
+            throw new IllegalStateException("Not enough players with chips to start hand");
         }
         if (state.phase() != GamePhase.WAITING && state.phase() != GamePhase.FINISHED) {
             throw new IllegalStateException("Previous hand has not finished yet");
@@ -142,15 +143,13 @@ public class GameEngineImpl implements GameEngine {
         if (state.phase() == GamePhase.FINISHED || state.phase() == GamePhase.WAITING) {
             return false;
         }
-
+        // Betting phases: auto-resolve only when the round is already complete
+        // (all players acted or are all-in). Otherwise players still need to act.
         if (state.phase().isBettingPhase()) {
-            return true;
+            return state.isBettingRoundComplete();
         }
-
-        boolean someoneCanAct = state.players().stream()
-                .anyMatch(p -> p.status().canAct() && p.chips() > 0);
-
-        return !someoneCanAct;
+        // SHOWDOWN: always auto-resolve (no player input needed)
+        return true;
     }
 
     private PhaseHandler findHandler(GamePhase phase) {

@@ -1,5 +1,8 @@
 spring:
   datasource:
+    hikari:
+      maximum-pool-size: 30
+      minimum-idle: 5
     url: ${DB_URL}
     username: ${DB_USER}
     password: ${DB_PASSWORD}
@@ -11,6 +14,16 @@ app:
   jwt:
     secret: ${JWT_SECRET}
     expiration-ms: ${JWT_EXPIRATION_MS:86400000}
+
+server:
+  tomcat:
+    accesslog:
+      enabled: true
+      directory: /app/logs
+      prefix: access
+      suffix: .log
+      pattern: '%{dd/MMM/yyyy HH:mm:ss}t "%r" %s %b %Dms'
+      rotate: false
 
 logging:
   level:

@@ -27,8 +27,10 @@ public final class PlayerTurnManager {
         List<PlayerState> players = state.players();
         int size = players.size();
 
-        // Pre-flop: first to act is the player after the BB (UTG).
-        // Post-flop: first to act is the player after the dealer (SB position).
+        // Pre-flop: first to act is the player after BB (UTG; in heads-up that's the SB/button).
+        // Post-flop: first active player LEFT of button = (dealerIndex+1) % size.
+        //   Heads-up: that's BB (non-button), who acts first post-flop per Roberts Rules §4.
+        //   3+ players: that's SB position.
         int start = isPreFlop
                 ? (bigBlindIndex(state) + 1) % size
                 : (state.dealerIndex() + 1) % size;
@@ -43,7 +45,16 @@ public final class PlayerTurnManager {
     }
 
     public static int smallBlindIndex(GameState state) {
-        return nextActiveIndex(state, state.dealerIndex());
+        List<PlayerState> players = state.players();
+        int size = players.size();
+        long activeCount = players.stream()
+                .filter(p -> p.status() == PlayerStatus.ACTIVE || p.status() == PlayerStatus.WAITING)
+                .count();
+        // Heads-up: dealer posts SB. 3+ players: SB is next player clockwise after dealer.
+        int start = activeCount <= 2
+                ? state.dealerIndex()
+                : (state.dealerIndex() + 1) % size;
+        return nextActiveIndex(state, start);
     }
 
     public static int bigBlindIndex(GameState state) {

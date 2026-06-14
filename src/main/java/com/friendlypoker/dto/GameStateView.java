@@ -3,6 +3,7 @@ package com.friendlypoker.dto;
 import com.friendlypoker.engine.domain.model.Card;
 import com.friendlypoker.engine.domain.model.GameState;
 import com.friendlypoker.engine.domain.model.enums.GamePhase;
+import com.friendlypoker.engine.domain.model.enums.PlayerStatus;
 
 import java.util.List;
 
@@ -38,7 +39,10 @@ public record GameStateView(
 
         List<PlayerView> players = state.players().stream().map(p -> {
                     boolean isViewer = viewerPlayerId != null && p.id().equals(viewerPlayerId);
-                    List<CardView> cards = (isViewer || showdown) && p.holeCards() != null
+                    // At showdown only reveal cards for players who were NOT folded/sitting-out
+                    boolean isShowdownParticipant = p.status() != PlayerStatus.FOLDED
+                            && p.status() != PlayerStatus.SITTING_OUT;
+                    List<CardView> cards = (isViewer || (showdown && isShowdownParticipant)) && p.holeCards() != null
                             ? p.holeCards().stream().map(CardView::from).toList()
                             : List.of();
                     return new PlayerView(

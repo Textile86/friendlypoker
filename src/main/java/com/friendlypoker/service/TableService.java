@@ -47,19 +47,18 @@ public class TableService {
         table.setCreatedBy(user);
         tableRepository.save(table);
 
-        return TableResponse.from(table, List.of());
+        return TableResponse.from(table, List.of(), member.getRole());
     }
 
     @Transactional(readOnly = true)
     public List<TableResponse> getClubTables(Long clubId, String username) {
         User user = loadUser(username);
 
-        if(!clubMemberRepository.existsByClubIdAndUserId(clubId, user.getId())) {
-            throw new IllegalArgumentException("You are not member of this club");
-        }
+        ClubMember member = clubMemberRepository.findByClubIdAndUserId(clubId, user.getId())
+                .orElseThrow(() -> new IllegalArgumentException("You are not member of this club"));
 
         return tableRepository.findByClubId(clubId).stream()
-                .map(t -> TableResponse.from(t, seatRepository.findByTableId(t.getId())))
+                .map(t -> TableResponse.from(t, seatRepository.findByTableId(t.getId()), member.getRole()))
                 .toList();
     }
 
@@ -68,11 +67,10 @@ public class TableService {
         User user = loadUser(username);
         PokerTable table = loadTable(tableId);
 
-        if (!clubMemberRepository.existsByClubIdAndUserId(table.getClub().getId(), user.getId())) {
-            throw new IllegalArgumentException("Access denied");
-        }
+        ClubMember member = clubMemberRepository.findByClubIdAndUserId(table.getClub().getId(), user.getId())
+                .orElseThrow(() -> new IllegalArgumentException("Access denied"));
 
-        return TableResponse.from(table, seatRepository.findByTableId(tableId));
+        return TableResponse.from(table, seatRepository.findByTableId(tableId), member.getRole());
     }
 
     @Transactional
@@ -80,9 +78,8 @@ public class TableService {
         User user = loadUser(username);
         PokerTable table = loadTable(tableId);
 
-        if (!clubMemberRepository.existsByClubIdAndUserId(table.getClub().getId(), user.getId())) {
-            throw new IllegalArgumentException("You are not member of this club");
-        }
+        ClubMember member = clubMemberRepository.findByClubIdAndUserId(table.getClub().getId(), user.getId())
+                .orElseThrow(() -> new IllegalArgumentException("You are not member of this club"));
 
         if (seatRepository.existsByTableIdAndUserId(tableId, user.getId())) {
             throw new IllegalArgumentException("You are already seated at this table");
@@ -105,7 +102,7 @@ public class TableService {
         seatRepository.save(seat);
 
         currentSeats.add(seat);
-        return TableResponse.from(table, currentSeats);
+        return TableResponse.from(table, currentSeats, member.getRole());
     }
 
     @Transactional

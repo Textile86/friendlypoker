@@ -5,6 +5,7 @@ import com.friendlypoker.engine.domain.event.GameEvent;
 import com.friendlypoker.engine.domain.model.GameResult;
 import com.friendlypoker.engine.domain.model.GameState;
 import com.friendlypoker.engine.domain.model.PlayerState;
+import com.friendlypoker.engine.domain.model.Pot;
 import com.friendlypoker.engine.domain.model.enums.GamePhase;
 import com.friendlypoker.engine.engine.PlayerTurnManager;
 
@@ -54,7 +55,8 @@ public abstract class AbstractBettingPhaseHandler implements PhaseHandler {
         PlayerState rewarded = winner.award(potTotal);
         GameState finished = state
                 .replacePlayer(rewarded)
-                .withPhase(GamePhase.FINISHED);
+                .withPhase(GamePhase.FINISHED)
+                .withPot(Pot.empty());
         events.add(new GameEvent.PotAwarded(
                 state.tableId(), winner.id(), potTotal, false, null));
         events.add(new GameEvent.HandFinished(
