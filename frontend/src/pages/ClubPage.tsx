@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import Navbar from '../components/Navbar'
 import { useAuth } from '../context/AuthContext'
 import { getMyClubs, createInvite, ClubResponse } from '../api/clubs'
-import { getClubTables, createTable, sitDown, standUp, TableResponse } from '../api/tables'
+import { getClubTables, createTable, TableResponse } from '../api/tables'
 
 export default function ClubPage() {
   const { id } = useParams<{ id: string }>()
@@ -69,29 +69,6 @@ export default function ClubPage() {
     setTimeout(() => setCopyLabel('Copy'), 2000)
   }
 
-  async function handleSit(tableId: number) {
-    try {
-      const updated = await sitDown(tableId)
-      setTables((prev) => prev.map((t) => (t.id === tableId ? updated : t)))
-    } catch (err: any) {
-      setError(err.response?.data?.error ?? 'Failed to sit')
-    }
-  }
-
-  async function handleStand(tableId: number) {
-    try {
-      await standUp(tableId)
-      setTables((prev) =>
-        prev.map((t) =>
-          t.id === tableId
-            ? { ...t, seats: t.seats.filter((s) => s.username !== username) }
-            : t
-        )
-      )
-    } catch (err: any) {
-      setError(err.response?.data?.error ?? 'Failed to stand')
-    }
-  }
 
   if (loading) {
     return (
@@ -214,8 +191,6 @@ export default function ClubPage() {
             <div className="grid gap-3">
               {tables.map((table) => {
                 const isSeated = table.seats.some((s) => s.username === username)
-                const isFull = table.seats.length >= table.maxPlayers
-                const isWaiting = table.status === 'WAITING'
 
                 return (
                   <div key={table.id} className="bg-gray-800 rounded-xl p-4">
@@ -234,30 +209,17 @@ export default function ClubPage() {
                         }`}>
                           {table.status}
                         </span>
-                        {isSeated ? (
-                          <>
-                            <button
-                              onClick={() => navigate(`/game/${table.id}`)}
-                              className="bg-blue-600 hover:bg-blue-500 text-sm px-3 py-1 rounded-lg transition font-semibold"
-                            >
-                              ▶ Play
-                            </button>
-                            <button
-                              onClick={() => handleStand(table.id)}
-                              className="bg-red-700 hover:bg-red-600 text-sm px-3 py-1 rounded-lg transition"
-                            >
-                              Stand Up
-                            </button>
-                          </>
-                        ) : (
-                          isWaiting && !isFull && (
-                            <button
-                              onClick={() => handleSit(table.id)}
-                              className="bg-green-700 hover:bg-green-600 text-sm px-3 py-1 rounded-lg transition"
-                            >
-                              Sit Down
-                            </button>
-                          )
+                        {table.status !== 'CLOSED' && (
+                          <button
+                            onClick={() => navigate(`/game/${table.id}`)}
+                            className={`text-sm px-3 py-1 rounded-lg transition font-semibold ${
+                              isSeated
+                                ? 'bg-blue-600 hover:bg-blue-500'
+                                : 'bg-green-700 hover:bg-green-600'
+                            }`}
+                          >
+                            {isSeated ? '▶ Play' : 'Join'}
+                          </button>
                         )}
                       </div>
                     </div>

@@ -3,6 +3,7 @@ package com.friendlypoker.service;
 import com.friendlypoker.dto.*;
 import com.friendlypoker.engine.domain.action.GameAction;
 import com.friendlypoker.engine.domain.event.GameEvent;
+import com.friendlypoker.engine.domain.model.Card;
 import com.friendlypoker.engine.domain.model.GameConfig;
 import com.friendlypoker.engine.domain.model.GameResult;
 import com.friendlypoker.engine.domain.model.GameState;
@@ -21,9 +22,13 @@ import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 @Service
@@ -36,6 +41,8 @@ public class GameService {
     private final UserRepository userRepository;
     private final HandHistoryRepository handHistoryRepository;
     private final ClubMemberRepository clubMemberRepository;
+
+    private final ScheduledExecutorService allInScheduler = Executors.newScheduledThreadPool(2);
 
     public GameStateView processAction(Long tableId, ActionRequest req, String username) {
         GameSession session = sessionManager.get(tableId);
@@ -64,6 +71,7 @@ public class GameService {
             case ALL_IN -> GameAction.allIn(playerId, req.amount());
         };
 
+        int initialCardCount = session.getState().communityCards().size();
         GameResult result = session.processAction(action);
 
         GameLogger.logAction(tableId, playerId, req.type(), req.amount());
@@ -71,11 +79,21 @@ public class GameService {
 
         boolean finished = result.newState().phase() == GamePhase.FINISHED;
 
-        broadcast(tableId, result);
+        List<GameEvent.CommunityCardDealt> cardEvents = result.events().stream()
+                .filter(e -> e instanceof GameEvent.CommunityCardDealt)
+                .map(e -> (GameEvent.CommunityCardDealt) e)
+                .toList();
 
-        if (finished) {
+        boolean isAllInRunout = finished && !cardEvents.isEmpty();
+
+        if (isAllInRunout) {
             finishGame(tableId, result);
-            // Keep session alive in FINISHED state so startHand can rotate dealer correctly
+            scheduleAllInRunout(tableId, result, cardEvents, initialCardCount);
+        } else {
+            broadcast(tableId, result);
+            if (finished) {
+                finishGame(tableId, result);
+            }
         }
 
         return GameStateView.from(tableId, result.newState(), playerId);
@@ -121,11 +139,9 @@ public class GameService {
         ClubMember member = clubMemberRepository.findByClubIdAndUserId(table.getClub().getId(), caller.getId())
                 .orElseThrow(() -> new IllegalArgumentException("Access denied"));
 
-        if (member.getRole() == ClubRole.MEMBER) {
-            throw new IllegalArgumentException("Only owners and admins can start a hand");
-        }
-
-        List<TableSeat> seats = seatRepository.findByTableId(tableId);
+        List<TableSeat> seats = seatRepository.findByTableId(tableId).stream()
+                .filter(s -> s.getChips() > 0)
+                .collect(Collectors.toList());
         if (seats.size() < table.getMinPlayers()) {
             throw new IllegalStateException("Not enough players");
         }
@@ -146,7 +162,8 @@ public class GameService {
                 for (TableSeat seat : seats) {
                     String pid = seat.getUser().getId().toString();
                     existingState.findPlayer(pid).ifPresent(p ->
-                            existingSession.setState(existingSession.getState().replacePlayer(p.withChips(seat.getChips())))
+                            existingSession.setState(existingSession.getState().replacePlayer(
+                                    p.withChips(seat.getChips()).withSeatIndex(seat.getSeatIndex())))
                     );
                 }
                 GameResult result = existingSession.startHand();
@@ -180,7 +197,7 @@ public class GameService {
             );
             state = r.newState();
             PlayerState p = state.findPlayer(seat.getUser().getId().toString()).get();
-            state = state.replacePlayer(p.withChips(seat.getChips()));
+            state = state.replacePlayer(p.withChips(seat.getChips()).withSeatIndex(seat.getSeatIndex()));
         }
 
         sessionManager.remove(tableId);
@@ -216,6 +233,53 @@ public class GameService {
                 .map(PlayerState::id)
                 .findFirst()
                 .orElse(null);
+    }
+
+    private void scheduleAllInRunout(Long tableId, GameResult result,
+                                      List<GameEvent.CommunityCardDealt> cardEvents,
+                                      int initialCardCount) {
+        GameState finalState = result.newState();
+        List<Card> allCards = finalState.communityCards();
+        String stateTopic = "/topic/tables/" + tableId + "/state";
+        String eventTopic = "/topic/tables/" + tableId + "/events";
+
+        // Immediately reveal hole cards and show the board as it was before the all-in
+        List<Card> baseCards = new ArrayList<>(allCards.subList(0, initialCardCount));
+        messaging.convertAndSend(stateTopic,
+                GameStateView.from(tableId, finalState.withPhase(GamePhase.SHOWDOWN).withCommunityCards(baseCards), null));
+
+        // Also broadcast the action events immediately (so the sidebar shows the all-in)
+        result.events().stream()
+                .filter(e -> e instanceof GameEvent.PlayerActed || e instanceof GameEvent.PlayerFolded)
+                .map(GameEventView::from)
+                .forEach(view -> messaging.convertAndSend(eventTopic, view));
+
+        // Schedule each street reveal with 3-second gaps
+        int delay = 3;
+        int cardOffset = initialCardCount;
+        for (GameEvent.CommunityCardDealt event : cardEvents) {
+            cardOffset += event.cards().size();
+            final List<Card> streetCards = new ArrayList<>(allCards.subList(0, cardOffset));
+            final int streetDelay = delay;
+
+            allInScheduler.schedule(() -> messaging.convertAndSend(stateTopic,
+                    GameStateView.from(tableId,
+                            finalState.withPhase(GamePhase.SHOWDOWN).withCommunityCards(streetCards), null)),
+                    streetDelay, TimeUnit.SECONDS);
+            delay += 3;
+        }
+
+        // After all streets + 3-second pause: broadcast FINISHED (triggers winner banner + auto-start)
+        final int finalDelay = delay;
+        allInScheduler.schedule(() -> {
+            messaging.convertAndSend(stateTopic, GameStateView.from(tableId, finalState, null));
+            result.events().stream()
+                    .filter(e -> !(e instanceof GameEvent.HoleCardsDealt)
+                              && !(e instanceof GameEvent.PlayerActed)
+                              && !(e instanceof GameEvent.PlayerFolded))
+                    .map(GameEventView::from)
+                    .forEach(view -> messaging.convertAndSend(eventTopic, view));
+        }, finalDelay, TimeUnit.SECONDS);
     }
 
     private void broadcast(Long tableId, GameResult result) {
@@ -277,7 +341,8 @@ public class GameService {
                 .orElseThrow(() -> new IllegalStateException("User not found"));
 
         TableSeat seat = seatRepository.findByTableIdAndUserId(tableId, user.getId())
-                .orElseThrow(() -> new IllegalArgumentException("You are not seated at this table"));
+                .orElse(null);
+        if (seat == null) return;
 
         GameSession session = sessionManager.get(tableId);
         if (session != null) {

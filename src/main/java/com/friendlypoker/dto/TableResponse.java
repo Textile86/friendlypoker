@@ -21,11 +21,11 @@ public record TableResponse(
         String myRole,
         List<SeatInfo> seats
 ) {
-    public record SeatInfo(int seatIndex, String username, int chips) {}
+    public record SeatInfo(int seatIndex, String username, int chips, int totalBuyIn) {}
 
     public static TableResponse from(PokerTable table, List<TableSeat> seats, ClubRole myRole) {
         List<SeatInfo> seatInfos = seats.stream()
-                .map(s -> new SeatInfo(s.getSeatIndex(), s.getUser().getUsername(), s.getChips()))
+                .map(s -> new SeatInfo(s.getSeatIndex(), s.getUser().getUsername(), s.getChips(), s.getTotalBuyIn()))
                 .toList();
 
         return new TableResponse(

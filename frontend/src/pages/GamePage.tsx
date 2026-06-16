@@ -7,7 +7,7 @@ import {
   CardView, PlayerView, GameStateView, AvailableActions,
   getGameState, getAvailableActions, startHand, submitAction,
 } from '../api/game'
-import { getTable, sitDown, standUp, closeTable, sitOut as sitOutAPI, imBack as imBackAPI, showCards as showCardsAPI, TableResponse } from '../api/tables'
+import { getTable, sitDown, standUp, rebuy, getTableStatistics, closeTable, sitOut as sitOutAPI, imBack as imBackAPI, showCards as showCardsAPI, TableResponse, PlayerStats } from '../api/tables'
 
 // ─── Card helpers ────────────────────────────────────────────────────────────
 
@@ -24,11 +24,11 @@ const isRed = (suit: string) => suit === 'HEARTS' || suit === 'DIAMONDS'
 function PlayingCard({ rank, suit }: CardView) {
   return (
     <div
-      className={`w-9 h-13 bg-white rounded-md shadow-md flex flex-col items-center justify-center font-bold leading-tight select-none ${isRed(suit) ? 'text-red-600' : 'text-gray-900'}`}
-      style={{ width: 36, height: 52 }}
+      className={`bg-white rounded-md shadow-md flex flex-col items-center justify-center font-bold select-none ${isRed(suit) ? 'text-red-600' : 'text-gray-900'}`}
+      style={{ width: 52, height: 72 }}
     >
-      <span className="text-sm">{RANK_DISPLAY[rank] ?? rank}</span>
-      <span className="text-base">{SUIT_SYMBOL[suit] ?? suit}</span>
+      <span style={{ fontSize: (RANK_DISPLAY[rank] ?? rank).length > 1 ? 16 : 22, lineHeight: '1.1' }}>{RANK_DISPLAY[rank] ?? rank}</span>
+      <span style={{ fontSize: 26, lineHeight: '1.1' }}>{SUIT_SYMBOL[suit] ?? suit}</span>
     </div>
   )
 }
@@ -37,9 +37,9 @@ function CardBack() {
   return (
     <div
       className="rounded-md shadow-md border-2 border-blue-500 bg-blue-700 flex items-center justify-center"
-      style={{ width: 36, height: 52 }}
+      style={{ width: 52, height: 72 }}
     >
-      <span className="text-blue-300 text-lg">★</span>
+      <span className="text-blue-300 text-xl">★</span>
     </div>
   )
 }
@@ -154,7 +154,11 @@ const POSITIONS: Record<number, Pos[]> = {
 function getBetChipPos(seatPos: Pos): Pos {
   const px = parseFloat(seatPos.left)
   const py = parseFloat(seatPos.top)
-  const factor = py > 65 ? 0.60 : 0.42
+  // Bottom-center seat: shift chips left of hole cards instead of up into board area
+  if (py > 75 && Math.abs(px - 50) < 15) {
+    return { left: `${(px - 14).toFixed(1)}%`, top: `${(py - 8).toFixed(1)}%` }
+  }
+  const factor = 0.42
   const bx = px + (50 - px) * factor
   const by = py + (50 - py) * factor
   return { left: `${bx.toFixed(1)}%`, top: `${by.toFixed(1)}%` }
@@ -255,6 +259,14 @@ export default function GamePage() {
   const prevPotRef = useRef(0)
   const potUpdateDelayRef = useRef(0) // timestamp after which pot chips visually update
 
+  // Buy-in / rebuy / stats modals
+  const [buyInModal, setBuyInModal] = useState<number | null>(null)  // seatIndex
+  const [buyInAmount, setBuyInAmount] = useState(0)
+  const [rebuyModal, setRebuyModal] = useState(false)
+  const [rebuyAmount, setRebuyAmount] = useState(0)
+  const [statsModal, setStatsModal] = useState(false)
+  const [stats, setStats] = useState<PlayerStats[] | null>(null)
+
   const gameStateRef = useRef<GameStateView | null>(null)
   const communityCardsRef = useRef<CardView[]>([])
 
@@ -314,7 +326,10 @@ export default function GamePage() {
       if (ev.type === 'BettingRoundCompleted') {
         potUpdateDelayRef.current = Date.now() + 850
         setSweepingToPot(true)
-        setTimeout(() => setSweepingToPot(false), 900)
+        setTimeout(() => {
+          setSweepingToPot(false)
+          setPotBreakdown([])
+        }, 900)
       }
       if (ev.type === 'PotAwarded') {
         const d = ev.data ?? {}
@@ -412,39 +427,65 @@ export default function GamePage() {
     }, delay)
   }, [gameState?.potTotal]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  async function handleAction(type: string, amount: number) {
+  async function handleAction(type: string, amount: number, silent = false) {
     if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null }
     setSubmitting(true)
-    setError('')
+    if (!silent) setError('')
     try {
       const next = await submitAction(tableId, type, amount)
       setGameState(next)
     } catch (err: any) {
-      setError(err.response?.data?.error ?? 'Action failed')
+      if (!silent) setError(err.response?.data?.error ?? 'Action failed')
     } finally {
       setSubmitting(false)
     }
   }
 
-  async function handleStartHand() {
-    setSubmitting(true)
-    setError('')
+  async function handleStartHand(silent = false) {
     try {
       const next = await startHand(tableId)
       setGameState(next)
     } catch (err: any) {
-      setError(err.response?.data?.error ?? 'Could not start hand')
-    } finally {
-      setSubmitting(false)
+      if (!silent) setError(err.response?.data?.error ?? 'Could not start hand')
     }
   }
 
-  async function handleSitDown() {
+  function handleSit(seatIndex: number) {
+    setBuyInAmount(table?.startingChips ?? minBuyIn)
+    setBuyInModal(seatIndex)
+  }
+
+  async function handleBuyIn() {
+    const seatIndex = buyInModal!
+    setBuyInModal(null)
     setError('')
     try {
-      setTable(await sitDown(tableId))
+      setTable(await sitDown(tableId, buyInAmount, seatIndex))
     } catch (err: any) {
       setError(err.response?.data?.error ?? 'Could not sit down')
+    }
+  }
+
+  async function handleRebuy() {
+    setRebuyModal(false)
+    setError('')
+    try {
+      const result = await rebuy(tableId, rebuyAmount)
+      setTable(result)
+      if (phase === 'FINISHED' && result.seats.filter((s) => s.chips > 0).length >= 2) {
+        setTimeout(() => handleStartHand(true), 2000)
+      }
+    } catch (err: any) {
+      setError(err.response?.data?.error ?? 'Re-buy failed')
+    }
+  }
+
+  async function openStats() {
+    try {
+      setStats(await getTableStatistics(tableId))
+      setStatsModal(true)
+    } catch {
+      setError('Could not load statistics')
     }
   }
 
@@ -492,16 +533,13 @@ export default function GamePage() {
     table?.status !== 'CLOSED' &&
     (table?.seats?.length ?? 0) < maxPlayers
 
+  const minBuyIn = (table?.bigBlind ?? 10) * 20
+  const maxBuyIn = (table?.bigBlind ?? 10) * 1000
+
   const seatedCount = hasGameState
     ? players.filter((p) => p.chips > 0).length
     : (table?.seats ?? []).length
   const isGameOver = phase === 'FINISHED' && seatedCount < 2
-  const canStartHand =
-    isSeated &&
-    (table?.myRole ? isStaff : true) &&
-    table?.status !== 'CLOSED' &&
-    phase === 'WAITING' &&
-    seatedCount >= 2
 
   const raiseAction = actions?.actions.find((a) => a.type === 'RAISE')
   const myChips = myPlayer?.chips ?? table?.seats?.find((s) => s.username === username)?.chips ?? 0
@@ -528,7 +566,7 @@ export default function GamePage() {
               setSittingOut(true)
               sitOutAPI(tableId).catch(() => {})
             }
-            handleAction('FOLD', 0)
+            handleAction('FOLD', 0, true)
           }
           return 0
         }
@@ -558,12 +596,20 @@ export default function GamePage() {
     return () => { if (showCardsTimerRef.current) { clearInterval(showCardsTimerRef.current); showCardsTimerRef.current = null } }
   }, [phase]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Auto-start next hand after FINISHED (staff only, 3-second delay)
+  // Auto-start next hand after FINISHED (5-second delay so winner banner is visible)
   useEffect(() => {
-    if (phase !== 'FINISHED' || !isStaff || !isSeated || seatedCount < 2) return
-    const timer = setTimeout(handleStartHand, 3000)
+    if (phase !== 'FINISHED' || !isSeated || seatedCount < 2) return
+    const timer = setTimeout(() => handleStartHand(true), 5000)
     return () => clearTimeout(timer)
   }, [phase]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Re-buy prompt when player busts
+  useEffect(() => {
+    if (myPlayer?.chips === 0 && isSeated && phase === 'FINISHED') {
+      setRebuyAmount(table?.startingChips ?? minBuyIn)
+      setRebuyModal(true)
+    }
+  }, [myPlayer?.chips, phase]) // eslint-disable-line react-hooks/exhaustive-deps
 
   if (loading) {
     return (
@@ -612,11 +658,9 @@ export default function GamePage() {
               {connected ? 'Live' : 'Connecting…'}
             </span>
             <div className="ml-auto flex items-center gap-2">
-              {canSitDown && (
-                <button onClick={handleSitDown} className="bg-green-700 hover:bg-green-600 px-3 py-1 rounded-lg text-xs font-semibold transition">
-                  🪑 Sit down
-                </button>
-              )}
+              <button onClick={openStats} className="bg-gray-700 hover:bg-gray-600 px-3 py-1 rounded-lg text-xs font-semibold transition">
+                📊 Stats
+              </button>
               {isSeated && (
                 <button onClick={handleLeave} className="bg-gray-700 hover:bg-gray-600 px-3 py-1 rounded-lg text-xs font-semibold transition">
                   🚪 Leave table
@@ -640,24 +684,40 @@ export default function GamePage() {
                 background: 'radial-gradient(ellipse at center, #15803d 0%, #166534 55%, #14532d 100%)',
                 border: '10px solid #7c3d12',
                 boxShadow: '0 4px 32px rgba(0,0,0,.8), inset 0 0 40px rgba(0,0,0,.4)',
+                pointerEvents: 'none',
               }}
             >
               <span className="text-green-300 text-xs font-semibold tracking-widest uppercase opacity-60">
                 {phase.replace('_', ' ')}
               </span>
               {pot > 0 && (
-                <div className="flex flex-col items-center gap-1">
-                  <ChipPile stacks={potBreakdown} chipW={26} />
-                  <div className="bg-black/50 rounded-full px-3 py-0.5">
-                    <span className="text-yellow-300 text-sm font-bold">Pot: {pot}</span>
-                  </div>
+                <div className="bg-black/50 rounded-full px-3 py-0.5">
+                  <span className="text-yellow-300 text-sm font-bold">Total pot: {pot}</span>
                 </div>
               )}
-              <div className="flex gap-1 min-h-[52px] items-center">
+              <div className="flex gap-1 min-h-[72px] items-center">
                 {community.length > 0
                   ? community.map((c, i) => <PlayingCard key={i} {...c} />)
                   : <span className="text-green-800 text-xs">Waiting for cards…</span>}
               </div>
+              {potBreakdown.length > 0 && (
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    marginTop: 4,
+                    transition: sweepingToPot ? 'opacity 0.6s ease-in, transform 0.6s ease-in' : 'none',
+                    opacity: sweepingToPot ? 0 : 1,
+                    transform: sweepingToPot ? 'translateY(-12px) scale(0.8)' : 'translateY(0) scale(1)',
+                  }}
+                >
+                  <span style={{ color: '#fde68a', fontSize: 13, fontWeight: 'bold', whiteSpace: 'nowrap' }}>
+                    pot: {potBreakdown.reduce((s, c) => s + c.denom.value * c.count, 0)}
+                  </span>
+                  <ChipPile stacks={potBreakdown} chipW={26} />
+                </div>
+              )}
             </div>
 
             {!hasGameState && (table?.seats ?? []).length > 0
@@ -674,6 +734,14 @@ export default function GamePage() {
                             <div className="opacity-80">{seat.chips} chips</div>
                           </div>
                         </div>
+                      ) : canSitDown ? (
+                        <button
+                          type="button"
+                          onMouseDown={() => handleSit(i)}
+                          className="w-16 h-8 border border-dashed border-green-600 rounded-lg flex items-center justify-center hover:bg-green-900/30 transition"
+                        >
+                          <span className="text-green-500 text-xs font-semibold">+ Sit</span>
+                        </button>
                       ) : (
                         <div className="w-16 h-7 border border-dashed border-gray-700 rounded-lg flex items-center justify-center">
                           <span className="text-gray-700 text-xs">empty</span>
@@ -695,7 +763,11 @@ export default function GamePage() {
                             <div className="text-[9px] opacity-60">waiting…</div>
                           </div>
                         ) : canSitDown ? (
-                          <button onClick={handleSitDown} className="w-16 h-8 border border-dashed border-green-600 rounded-lg flex items-center justify-center hover:bg-green-900/30 transition">
+                          <button
+                            type="button"
+                            onMouseDown={() => handleSit(i)}
+                            className="w-16 h-8 border border-dashed border-green-600 rounded-lg flex items-center justify-center hover:bg-green-900/30 transition"
+                          >
                             <span className="text-green-500 text-xs font-semibold">+ Sit</span>
                           </button>
                         ) : (
@@ -766,14 +838,6 @@ export default function GamePage() {
 
           {/* Action panel */}
           <div className="w-full max-w-lg">
-            {canStartHand && (
-              <div className="flex justify-center">
-                <button onClick={handleStartHand} disabled={submitting} className="bg-green-600 hover:bg-green-700 disabled:opacity-50 px-10 py-3 rounded-xl font-semibold text-lg shadow-lg transition">
-                  {submitting ? 'Starting…' : '▶ Start Hand'}
-                </button>
-              </div>
-            )}
-
             {actions?.yourTurn && myPlayer?.status !== 'ALL_IN' && (
               <div className="bg-gray-800 rounded-xl p-4 space-y-3 shadow-lg">
                 <div className="flex items-center justify-between">
@@ -864,6 +928,133 @@ export default function GamePage() {
           </div>
         </div>
       </div>
+
+      {/* Buy-in modal */}
+      {buyInModal !== null && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center" style={{ zIndex: 9999 }}>
+          <div className="bg-gray-900 border border-gray-700 rounded-xl p-6 w-80 space-y-4 shadow-2xl">
+            <h2 className="text-lg font-semibold">Buy In — Seat {buyInModal + 1}</h2>
+            <div className="space-y-1">
+              <label className="text-xs text-gray-400">Amount (min {minBuyIn} / max {maxBuyIn})</label>
+              <input
+                type="number"
+                min={minBuyIn}
+                max={maxBuyIn}
+                value={buyInAmount}
+                onChange={(e) => setBuyInAmount(Number(e.target.value))}
+                className="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-green-500"
+              />
+              <input
+                type="range"
+                min={minBuyIn}
+                max={maxBuyIn}
+                step={table?.bigBlind ?? 10}
+                value={buyInAmount}
+                onChange={(e) => setBuyInAmount(Number(e.target.value))}
+                className="w-full accent-green-500"
+              />
+            </div>
+            <div className="flex gap-3">
+              <button
+                onClick={handleBuyIn}
+                disabled={buyInAmount < minBuyIn || buyInAmount > maxBuyIn}
+                className="flex-1 bg-green-600 hover:bg-green-700 disabled:opacity-50 py-2 rounded-lg font-semibold transition"
+              >
+                Sit Down
+              </button>
+              <button
+                onClick={() => setBuyInModal(null)}
+                className="flex-1 bg-gray-700 hover:bg-gray-600 py-2 rounded-lg font-semibold transition"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Re-buy modal */}
+      {rebuyModal && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center" style={{ zIndex: 9999 }}>
+          <div className="bg-gray-900 border border-gray-700 rounded-xl p-6 w-80 space-y-4 shadow-2xl">
+            <h2 className="text-lg font-semibold">Re-Buy</h2>
+            <p className="text-sm text-gray-400">You have no chips left. Add more chips to continue playing.</p>
+            <div className="space-y-1">
+              <label className="text-xs text-gray-400">Amount (min {minBuyIn} / max {maxBuyIn})</label>
+              <input
+                type="number"
+                min={minBuyIn}
+                max={maxBuyIn}
+                value={rebuyAmount}
+                onChange={(e) => setRebuyAmount(Number(e.target.value))}
+                className="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-green-500"
+              />
+              <input
+                type="range"
+                min={minBuyIn}
+                max={maxBuyIn}
+                step={table?.bigBlind ?? 10}
+                value={rebuyAmount}
+                onChange={(e) => setRebuyAmount(Number(e.target.value))}
+                className="w-full accent-green-500"
+              />
+            </div>
+            <div className="flex gap-3">
+              <button
+                onClick={handleRebuy}
+                disabled={rebuyAmount < minBuyIn || rebuyAmount > maxBuyIn}
+                className="flex-1 bg-green-600 hover:bg-green-700 disabled:opacity-50 py-2 rounded-lg font-semibold transition"
+              >
+                Re-Buy
+              </button>
+              <button
+                onClick={() => { setRebuyModal(false); handleLeave() }}
+                className="flex-1 bg-gray-700 hover:bg-gray-600 py-2 rounded-lg font-semibold transition"
+              >
+                Leave Table
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Statistics modal */}
+      {statsModal && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center" style={{ zIndex: 9999 }}>
+          <div className="bg-gray-900 border border-gray-700 rounded-xl p-6 w-96 space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-semibold">Table Statistics</h2>
+              <button onClick={() => setStatsModal(false)} className="text-gray-500 hover:text-gray-300 text-xl leading-none">×</button>
+            </div>
+            {stats && stats.length > 0 ? (
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-gray-400 text-xs border-b border-gray-700">
+                    <th className="text-left pb-2">Player</th>
+                    <th className="text-right pb-2">Chips</th>
+                    <th className="text-right pb-2">Bought</th>
+                    <th className="text-right pb-2">Net</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {stats.map((s) => (
+                    <tr key={s.username} className="border-b border-gray-800">
+                      <td className="py-1.5 font-medium">{s.username}</td>
+                      <td className="py-1.5 text-right">{s.chips}</td>
+                      <td className="py-1.5 text-right text-gray-400">{s.totalBuyIn}</td>
+                      <td className={`py-1.5 text-right font-semibold ${s.net >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                        {s.net >= 0 ? '+' : ''}{s.net}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : (
+              <p className="text-gray-500 text-sm text-center">No players at this table</p>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

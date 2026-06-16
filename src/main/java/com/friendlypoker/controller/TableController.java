@@ -1,8 +1,10 @@
 package com.friendlypoker.controller;
 
-import com.friendlypoker.dto.CreateTableRequest;
 import com.friendlypoker.dto.GameEventView;
+import com.friendlypoker.dto.SitDownRequest;
 import com.friendlypoker.dto.TableResponse;
+import com.friendlypoker.dto.TableStatsResponse;
+import com.friendlypoker.dto.CreateTableRequest;
 import com.friendlypoker.service.GameService;
 import com.friendlypoker.service.TableService;
 import jakarta.validation.Valid;
@@ -49,11 +51,24 @@ public class TableController {
     @PostMapping("/api/tables/{id}/sit")
     public ResponseEntity<TableResponse> sit(
             @PathVariable Long id,
+            @RequestBody SitDownRequest req,
             @AuthenticationPrincipal UserDetails user) {
-        TableResponse result = tableService.sitDown(id, user.getUsername());
-        // broadcast AFTER transaction commits so other clients see the new seat immediately
+
+        TableResponse result = tableService.sitDown(id, user.getUsername(), req);
+
         messaging.convertAndSend("/topic/tables/" + id + "/events",
                 new GameEventView("SeatsChanged", Map.of("tableId", id)));
+
+        // Auto-start hand when 2+ players with chips are seated and game is waiting
+        long withChips = result.seats().stream().filter(s -> s.chips() > 0).count();
+        if ("WAITING".equals(result.status()) && withChips >= 2) {
+            try {
+                gameService.startHand(id, user.getUsername());
+            } catch (Exception ignored) {
+                // best-effort: hand may already be running or player lacks permission
+            }
+        }
+
         return ResponseEntity.ok(result);
     }
 
@@ -65,5 +80,24 @@ public class TableController {
         messaging.convertAndSend("/topic/tables/" + id + "/events",
                 new GameEventView("SeatsChanged", Map.of("tableId", id)));
         return ResponseEntity.noContent().build();
+    }
+
+    @PostMapping("/api/tables/{id}/rebuy")
+    public ResponseEntity<TableResponse> rebuy(
+            @PathVariable Long id,
+            @RequestBody Map<String, Integer> body,
+            @AuthenticationPrincipal UserDetails user) {
+        int chips = body.getOrDefault("chips", 0);
+        TableResponse result = tableService.rebuy(id, user.getUsername(), chips);
+        messaging.convertAndSend("/topic/tables/" + id + "/events",
+                new GameEventView("SeatsChanged", Map.of("tableId", id)));
+        return ResponseEntity.ok(result);
+    }
+
+    @GetMapping("/api/tables/{id}/statistics")
+    public ResponseEntity<TableStatsResponse> statistics(
+            @PathVariable Long id,
+            @AuthenticationPrincipal UserDetails user) {
+        return ResponseEntity.ok(tableService.getStatistics(id, user.getUsername()));
     }
 }

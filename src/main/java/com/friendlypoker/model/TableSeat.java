@@ -35,4 +35,6 @@ public class TableSeat {
     private Instant joinedAt;
 
     private int chips;
+
+    private int totalBuyIn;
 }

@@ -1,7 +1,9 @@
 package com.friendlypoker.service;
 
 import com.friendlypoker.dto.CreateTableRequest;
+import com.friendlypoker.dto.SitDownRequest;
 import com.friendlypoker.dto.TableResponse;
+import com.friendlypoker.dto.TableStatsResponse;
 import com.friendlypoker.model.*;
 import com.friendlypoker.repository.*;
 import lombok.RequiredArgsConstructor;
@@ -74,19 +76,19 @@ public class TableService {
     }
 
     @Transactional
-    public TableResponse sitDown(Long tableId, String username) {
+    public TableResponse sitDown(Long tableId, String username, SitDownRequest req) {
         User user = loadUser(username);
         PokerTable table = loadTable(tableId);
 
         ClubMember member = clubMemberRepository.findByClubIdAndUserId(table.getClub().getId(), user.getId())
                 .orElseThrow(() -> new IllegalArgumentException("You are not member of this club"));
 
-        if (seatRepository.existsByTableIdAndUserId(tableId, user.getId())) {
-            throw new IllegalArgumentException("You are already seated at this table");
+        if (table.getStatus() == TableStatus.CLOSED) {
+            throw new IllegalArgumentException("Table is closed");
         }
 
-        if (table.getStatus() != TableStatus.WAITING) {
-            throw new IllegalArgumentException("Table is not accepting players");
+        if (seatRepository.existsByTableIdAndUserId(tableId, user.getId())) {
+            throw new IllegalArgumentException("You are already seated at this table");
         }
 
         List<TableSeat> currentSeats = seatRepository.findByTableId(tableId);
@@ -94,15 +96,77 @@ public class TableService {
             throw new IllegalArgumentException("Table is full");
         }
 
+        int seatIndex = req.seatIndex();
+        if (seatIndex < 0 || seatIndex >= table.getMaxPlayers()) {
+            throw new IllegalArgumentException("Invalid seat index");
+        }
+        boolean seatTaken = currentSeats.stream().anyMatch(s -> s.getSeatIndex() == seatIndex);
+        if (seatTaken) {
+            throw new IllegalArgumentException("That seat is already taken");
+        }
+
+        int minBuyIn = table.getBigBlind() * 20;
+        int maxBuyIn = table.getBigBlind() * 1000;
+        int chips = req.chips();
+        if (chips < minBuyIn || chips > maxBuyIn) {
+            throw new IllegalArgumentException(
+                    "Buy-in must be between " + minBuyIn + " and " + maxBuyIn + " chips");
+        }
+
         TableSeat seat = new TableSeat();
         seat.setTable(table);
         seat.setUser(user);
-        seat.setSeatIndex(nextAvailableSeat(currentSeats, table.getMaxPlayers()));
-        seat.setChips(table.getStartingChips());
+        seat.setSeatIndex(seatIndex);
+        seat.setChips(chips);
+        seat.setTotalBuyIn(chips);
         seatRepository.save(seat);
 
         currentSeats.add(seat);
         return TableResponse.from(table, currentSeats, member.getRole());
+    }
+
+    @Transactional
+    public TableResponse rebuy(Long tableId, String username, int chips) {
+        User user = loadUser(username);
+        PokerTable table = loadTable(tableId);
+
+        ClubMember member = clubMemberRepository.findByClubIdAndUserId(table.getClub().getId(), user.getId())
+                .orElseThrow(() -> new IllegalArgumentException("Access denied"));
+
+        TableSeat seat = seatRepository.findByTableIdAndUserId(tableId, user.getId())
+                .orElseThrow(() -> new IllegalArgumentException("You are not seated at this table"));
+
+        int minBuyIn = table.getBigBlind() * 20;
+        int maxBuyIn = table.getBigBlind() * 1000;
+        if (chips < minBuyIn || chips > maxBuyIn) {
+            throw new IllegalArgumentException(
+                    "Buy-in must be between " + minBuyIn + " and " + maxBuyIn + " chips");
+        }
+
+        seat.setChips(seat.getChips() + chips);
+        seat.setTotalBuyIn(seat.getTotalBuyIn() + chips);
+        seatRepository.save(seat);
+
+        return TableResponse.from(table, seatRepository.findByTableId(tableId), member.getRole());
+    }
+
+    @Transactional(readOnly = true)
+    public TableStatsResponse getStatistics(Long tableId, String username) {
+        User user = loadUser(username);
+        PokerTable table = loadTable(tableId);
+
+        clubMemberRepository.findByClubIdAndUserId(table.getClub().getId(), user.getId())
+                .orElseThrow(() -> new IllegalArgumentException("Access denied"));
+
+        List<TableStatsResponse.PlayerStats> stats = seatRepository.findByTableId(tableId).stream()
+                .map(s -> new TableStatsResponse.PlayerStats(
+                        s.getUser().getUsername(),
+                        s.getChips(),
+                        s.getTotalBuyIn(),
+                        s.getChips() - s.getTotalBuyIn()))
+                .toList();
+
+        return new TableStatsResponse(stats);
     }
 
     @Transactional
@@ -115,16 +179,6 @@ public class TableService {
         seatRepository.delete(seat);
     }
 
-    private int nextAvailableSeat(List<TableSeat> seats, int maxPlayers) {
-        Set<Integer> taken = seats.stream()
-                .map(TableSeat::getSeatIndex)
-                .collect(Collectors.toSet());
-        for (int i = 0; i < maxPlayers; i++) {
-            if (!taken.contains(i)) return i;
-        }
-        throw new IllegalStateException("No seats available");
-    }
-
     private User loadUser(String username) {
         return userRepository.findByUsername(username)
                 .orElseThrow(() -> new IllegalStateException("User not found"));
@@ -134,5 +188,4 @@ public class TableService {
         return tableRepository.findById(tableId)
                 .orElseThrow(() -> new IllegalArgumentException("Table not found"));
     }
-
 }
