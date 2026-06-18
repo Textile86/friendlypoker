@@ -98,7 +98,11 @@ clear_db.sql
 ping_test.sh
 test_api.sh
 check_env.sh
+check_api.sh
 check_nine_table.py
+diagnose.sh
+setup_3_players.sh
+stress_test_v6_mega.py
 test_leave_table.py
 test_leave_hard.py
 test_leave_race.py
@@ -110,6 +114,7 @@ tri_topora_no_rebuild.sh
 # Bat-скрипты для ручного тестирования
 9_profiles.bat
 вишневая_девятка.sh
+tri_topora.bat
 вишневая_девятка_full.bat
 
 # Утилиты

@@ -56,6 +56,7 @@ function formatEvent(ev: RawGameEvent, name: (id: string) => string): string {
     case 'HandFinished': return `--- Hand finished ---`
     case 'PlayerLeft': return `🚪 ${n(d.playerId ?? '')} left`
     case 'TableClosed': return `⏹ Table closed`
+    case 'TablePaused': return `⏸ Table paused for ${d.minutes ?? ''} min`
     case 'CardsShown': {
       const cards = (d.cards ?? []).map((c: { rank: string; suit: string }) => cardStr(c)).join(' ')
       return `👁 ${d.displayName ?? n(d.playerId)} shows: ${cards}`

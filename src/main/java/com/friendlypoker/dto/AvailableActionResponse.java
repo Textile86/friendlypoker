@@ -21,7 +21,7 @@ public record AvailableActionResponse(
 
         PlayerState current = state.currentPlayer();
 
-        if (current.status() == PlayerStatus.ALL_IN) {
+        if (!current.status().canAct()) {
             return new AvailableActionResponse(false, null, List.of());
         }
 

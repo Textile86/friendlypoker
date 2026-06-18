@@ -4,6 +4,7 @@ import com.friendlypoker.model.ClubRole;
 import com.friendlypoker.model.PokerTable;
 import com.friendlypoker.model.TableSeat;
 
+import java.time.Instant;
 import java.util.List;
 
 public record TableResponse(
@@ -18,6 +19,7 @@ public record TableResponse(
         int actionTimeoutSecs,
         String variant,
         String status,
+        Instant pausedUntil,
         String myRole,
         List<SeatInfo> seats
 ) {
@@ -40,6 +42,7 @@ public record TableResponse(
                 table.getActionTimeoutSecs(),
                 table.getVariant().name(),
                 table.getStatus().name(),
+                table.getPausedUntil(),
                 myRole != null ? myRole.name() : null,
                 seatInfos
         );

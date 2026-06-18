@@ -4,6 +4,7 @@ import com.friendlypoker.engine.domain.action.GameAction;
 import com.friendlypoker.engine.domain.event.GameEvent;
 import com.friendlypoker.engine.domain.model.*;
 import com.friendlypoker.engine.domain.model.enums.GamePhase;
+import com.friendlypoker.engine.engine.pot.PotCalculator;
 import com.friendlypoker.engine.evaluation.HandEvaluation;
 import com.friendlypoker.engine.evaluation.HandEvaluator;
 
@@ -46,19 +47,21 @@ public class ShowdownHandler implements PhaseHandler {
                         ))
         ));
 
-        GameState next = awardPot(state, state.pot().mainPot(), evaluations, events, false);
-
-        for (SidePot sidepot : state.pot().sidePots()) {
+        List<SidePot> pots = PotCalculator.calculate(state.players());
+        GameState next = state;
+        for (int i = 0; i < pots.size(); i++) {
+            SidePot pot = pots.get(i);
             Map<String, HandEvaluation> eligible = evaluations.entrySet().stream()
-                    .filter(e -> sidepot.eligiblePlayerIds().contains(e.getKey()))
+                    .filter(e -> pot.eligiblePlayerIds().contains(e.getKey()))
                     .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
-            next = awardPot(next, sidepot.amount(), eligible, events, true);
+            next = awardPot(next, pot.amount(), eligible, events, i > 0);
         }
 
         Map<String, Integer> deltas = new HashMap<>();
         for (PlayerState original : state.players()) {
             PlayerState updated = next.findPlayer(original.id()).orElse(original);
-            int delta = updated.chips() - original.chips();
+            int preHandChips = original.chips() + original.totalBet();
+            int delta = updated.chips() - preHandChips;
             if (delta != 0) {
                 deltas.put(original.id(), delta);
             }

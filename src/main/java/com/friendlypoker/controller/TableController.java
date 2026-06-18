@@ -1,6 +1,7 @@
 package com.friendlypoker.controller;
 
 import com.friendlypoker.dto.GameEventView;
+import com.friendlypoker.dto.PauseTableRequest;
 import com.friendlypoker.dto.SitDownRequest;
 import com.friendlypoker.dto.TableResponse;
 import com.friendlypoker.dto.TableStatsResponse;
@@ -15,6 +16,7 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 
@@ -61,7 +63,8 @@ public class TableController {
 
         // Auto-start hand when 2+ players with chips are seated and game is waiting
         long withChips = result.seats().stream().filter(s -> s.chips() > 0).count();
-        if ("WAITING".equals(result.status()) && withChips >= 2) {
+        boolean pauseActive = result.pausedUntil() != null && result.pausedUntil().isAfter(Instant.now());
+        if ("WAITING".equals(result.status()) && !pauseActive && withChips >= 2) {
             try {
                 gameService.startHand(id, user.getUsername());
             } catch (Exception ignored) {
@@ -91,6 +94,15 @@ public class TableController {
         TableResponse result = tableService.rebuy(id, user.getUsername(), chips);
         messaging.convertAndSend("/topic/tables/" + id + "/events",
                 new GameEventView("SeatsChanged", Map.of("tableId", id)));
+        return ResponseEntity.ok(result);
+    }
+
+    @PostMapping("/api/tables/{id}/pause")
+    public ResponseEntity<TableResponse> pause(
+            @PathVariable Long id,
+            @RequestBody PauseTableRequest req,
+            @AuthenticationPrincipal UserDetails user) {
+        TableResponse result = gameService.pauseTable(id, user.getUsername(), req.minutes());
         return ResponseEntity.ok(result);
     }
 

@@ -7,7 +7,7 @@ import {
   CardView, PlayerView, GameStateView, AvailableActions,
   getGameState, getAvailableActions, startHand, submitAction,
 } from '../api/game'
-import { getTable, sitDown, standUp, rebuy, getTableStatistics, closeTable, sitOut as sitOutAPI, imBack as imBackAPI, showCards as showCardsAPI, TableResponse, PlayerStats } from '../api/tables'
+import { getTable, sitDown, standUp, rebuy, getTableStatistics, closeTable, pauseTable, sitOut as sitOutAPI, imBack as imBackAPI, showCards as showCardsAPI, TableResponse, PlayerStats } from '../api/tables'
 
 // ─── Card helpers ────────────────────────────────────────────────────────────
 
@@ -78,33 +78,75 @@ function ChipPile({ amount, stacks: stacksProp, chipW = 26 }: {
 }) {
   const stacks = stacksProp ?? (amount && amount > 0 ? decompose(amount) : [])
   if (stacks.length === 0) return null
-  const faceH = Math.round(chipW * 0.5)   // oval height ≈ half width → 45° tilt illusion
-  const step = 3                            // px each lower chip peeks out — barely visible arc
+  const faceH = Math.round(chipW * 0.58)
+  const step = Math.max(2, Math.round(chipW * 0.12))
+  const showLabel = chipW >= 20
   return (
-    <div style={{ display: 'flex', alignItems: 'flex-end', gap: 4 }}>
-      {stacks.map(({ denom: d, count }) => {
+    <div style={{ display: 'flex', alignItems: 'flex-end', gap: 4, filter: 'drop-shadow(0 2px 4px rgba(0,0,0,.28))' }}>
+      {stacks.map(({ denom: d, count }, stackIndex) => {
         const stackH = faceH + (count - 1) * step
         return (
           <div key={d.value} style={{ position: 'relative', width: chipW, height: stackH }}>
-            {Array.from({ length: count }).map((_, i) => (
-              <div
-                key={i}
-                style={{
-                  position: 'absolute',
-                  bottom: i * step,
-                  left: 0,
-                  width: chipW,
-                  height: faceH,
-                  borderRadius: '50%',
-                  background: `radial-gradient(ellipse at 35% 32%, ${d.hi} 0%, ${d.base} 70%)`,
-                  border: `1.5px solid ${d.border}`,
-                  boxShadow: i === count - 1
-                    ? '0 2px 6px rgba(0,0,0,.7), inset 0 1px 0 rgba(255,255,255,.2)'
-                    : 'inset 0 1px 0 rgba(255,255,255,.08)',
-                  zIndex: i + 1,
-                }}
-              />
-            ))}
+            {Array.from({ length: count }).map((_, i) => {
+              const isTop = i === count - 1
+              const tilt = (stackIndex % 2 === 0 ? -1 : 1) * (i - (count - 1) / 2) * 0.35
+              return (
+                <div
+                  key={i}
+                  style={{
+                    position: 'absolute',
+                    bottom: i * step,
+                    left: 0,
+                    width: chipW,
+                    height: faceH,
+                    borderRadius: '50%',
+                    transform: `rotate(${tilt}deg) scale(${1 - i * 0.015})`,
+                    background: `radial-gradient(circle at 32% 28%, ${d.hi} 0%, ${d.base} 52%, ${d.edge} 100%)`,
+                    border: `2px solid ${d.border}`,
+                    boxShadow: isTop
+                      ? '0 3px 8px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.35)'
+                      : 'inset 0 1px 0 rgba(255,255,255,.12)',
+                    overflow: 'hidden',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <div
+                    style={{
+                      position: 'absolute',
+                      inset: '14%',
+                      borderRadius: '50%',
+                      border: '2px solid rgba(255,255,255,.78)',
+                      opacity: 0.88,
+                    }}
+                  />
+                  <div
+                    style={{
+                      position: 'absolute',
+                      inset: '34% 20%',
+                      borderRadius: '999px',
+                      background: 'rgba(255,255,255,.16)',
+                    }}
+                  />
+                  {showLabel && isTop && (
+                    <span
+                      style={{
+                        position: 'relative',
+                        zIndex: 1,
+                        fontSize: Math.max(9, Math.round(chipW * 0.24)),
+                        fontWeight: 900,
+                        color: d.text,
+                        textShadow: '0 1px 2px rgba(0,0,0,.55)',
+                        lineHeight: 1,
+                      }}
+                    >
+                      {d.value}
+                    </span>
+                  )}
+                </div>
+              )
+            })}
           </div>
         )
       })}
@@ -187,7 +229,7 @@ function PlayerSeat({ player, isMe, isDealer, isActive, maxPlayers, receivingPot
   const folded = (player.status === 'FOLDED' || player.status === 'SITTING_OUT') && phase !== 'FINISHED'
   // Show hole cards if server sent them; in FINISHED only show cards for players with chips (or if server revealed)
   const showCards = player.holeCards.length > 0 && (phase !== 'FINISHED' || player.chips > 0 || player.holeCards.length > 0)
-  const showCardBacks = !showCards && (player.status === 'ACTIVE' || player.status === 'ALL_IN') && phase !== 'FINISHED'
+  const showCardBacks = !showCards && phase !== 'FINISHED' && ((player.status === 'ACTIVE' || player.status === 'ALL_IN') || isMe)
 
   return (
     <div
@@ -258,24 +300,106 @@ export default function GamePage() {
   const [potBreakdown, setPotBreakdown] = useState<ChipStack[]>([])
   const prevPotRef = useRef(0)
   const potUpdateDelayRef = useRef(0) // timestamp after which pot chips visually update
+  const [awardAnim, setAwardAnim] = useState<{ seatIndex: number; amount: number; label: string; isSidePot: boolean; stage: 'hold' | 'fly' | 'fade' } | null>(null)
+  const awardAnimQueueRef = useRef<Array<{ seatIndex: number; amount: number; label: string; isSidePot: boolean }>>([])
+  const awardAnimTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [pendingBetAnim, setPendingBetAnim] = useState<{ seatIndex: number; amount: number; stage: 'hold' | 'sweep' } | null>(null)
+  const pendingBetAnimRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Buy-in / rebuy / stats modals
   const [buyInModal, setBuyInModal] = useState<number | null>(null)  // seatIndex
   const [buyInAmount, setBuyInAmount] = useState(0)
   const [rebuyModal, setRebuyModal] = useState(false)
   const [rebuyAmount, setRebuyAmount] = useState(0)
+  const [pauseModal, setPauseModal] = useState(false)
+  const [pauseMinutes, setPauseMinutes] = useState(1)
+  const [pauseRemaining, setPauseRemaining] = useState(0)
   const [statsModal, setStatsModal] = useState(false)
   const [stats, setStats] = useState<PlayerStats[] | null>(null)
 
   const gameStateRef = useRef<GameStateView | null>(null)
   const communityCardsRef = useRef<CardView[]>([])
+  const pauseTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   // My cards (from personalized REST response), keyed by hand number
   const myCardsRef = useRef<{ hand: number; seat: number; cards: CardView[] } | null>(null)
   const fetchedHandRef = useRef(-1)
+  const viewerCardsRetryRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const lastHandStartedRef = useRef(-1)
   const lastHandRef = useRef(-1)
   const prevPhaseRef = useRef('')
   const prevPlayerIdxRef = useRef(-1)
+
+  function clearViewerCardsRetry() {
+    if (viewerCardsRetryRef.current) {
+      clearTimeout(viewerCardsRetryRef.current)
+      viewerCardsRetryRef.current = null
+    }
+  }
+
+  function stashViewerCards(state: GameStateView | null | undefined) {
+    if (!state) return
+    const me = state.players.find((p) => p.holeCards.length > 0)
+    if (!me) return
+    myCardsRef.current = { hand: state.handNumber, seat: me.seatIndex, cards: me.holeCards }
+    fetchedHandRef.current = state.handNumber
+  }
+
+  function syncViewerCards(handNumber: number, attempt = 0) {
+    if (gameStateRef.current?.handNumber !== handNumber) return
+    getGameState(tableId)
+      .then((s) => {
+        if (gameStateRef.current?.handNumber !== handNumber) return
+        const me = s.players.find((p) => p.holeCards.length > 0)
+        if (me) {
+          stashViewerCards(s)
+          setGameState((prev) => {
+            if (!prev || prev.handNumber !== s.handNumber) return prev
+            return {
+              ...prev,
+              players: prev.players.map((p) =>
+                p.seatIndex === me.seatIndex ? { ...p, holeCards: me.holeCards } : p
+              ),
+            }
+          })
+          clearViewerCardsRetry()
+          return
+        }
+        if (attempt < 20 && gameStateRef.current?.handNumber === handNumber && BETTING_PHASES.has(gameStateRef.current.phase)) {
+          viewerCardsRetryRef.current = setTimeout(() => syncViewerCards(handNumber, attempt + 1), 250)
+        }
+      })
+      .catch(() => {
+        if (attempt < 20 && gameStateRef.current?.handNumber === handNumber && BETTING_PHASES.has(gameStateRef.current.phase)) {
+          viewerCardsRetryRef.current = setTimeout(() => syncViewerCards(handNumber, attempt + 1), 250)
+        }
+      })
+  }
+
+
+  function clearAwardAnimTimer() {
+    if (awardAnimTimerRef.current) {
+      clearTimeout(awardAnimTimerRef.current)
+      awardAnimTimerRef.current = null
+    }
+  }
+
+  function playNextAwardAnim() {
+    if (awardAnimTimerRef.current || awardAnimQueueRef.current.length === 0) return
+    const next = awardAnimQueueRef.current.shift()!
+    setAwardAnim({ ...next, stage: 'hold' })
+    awardAnimTimerRef.current = setTimeout(() => {
+      setAwardAnim((prev) => (prev ? { ...prev, stage: 'fly' } : prev))
+      awardAnimTimerRef.current = setTimeout(() => {
+        setAwardAnim((prev) => (prev ? { ...prev, stage: 'fade' } : prev))
+        awardAnimTimerRef.current = setTimeout(() => {
+          setAwardAnim(null)
+          awardAnimTimerRef.current = null
+          playNextAwardAnim()
+        }, 350)
+      }, 800)
+    }, 600)
+  }
 
   // Initial load
   useEffect(() => {
@@ -283,7 +407,7 @@ export default function GamePage() {
       getTable(tableId),
       getGameState(tableId).catch(() => null),
     ])
-      .then(([t, s]) => { setTable(t); if (s) setGameState(s) })
+      .then(([t, s]) => { setTable(t); if (s) { stashViewerCards(s); setGameState(s) } })
       .catch(() => setError('Could not load table'))
       .finally(() => setLoading(false))
   }, [tableId])
@@ -316,12 +440,22 @@ export default function GamePage() {
       if (ev.type === 'SeatsChanged') getTable(tableId).then(setTable).catch(() => {})
       if (ev.type === 'PlayerLeft') getTable(tableId).then(setTable).catch(() => {})
       if (ev.type === 'HandStarted') {
+        const handNumber = Number(ev.data?.handNumber ?? -1)
+        if (handNumber !== -1 && handNumber === lastHandStartedRef.current) return
+        if (handNumber !== -1) lastHandStartedRef.current = handNumber
         myCardsRef.current = null
+        clearViewerCardsRetry()
         setLastWinner(null)
         setSweepingToPot(false)
         setPotToWinner(null)
         setPotBreakdown([])
+        clearAwardAnimTimer()
+        awardAnimQueueRef.current = []
+        setAwardAnim(null)
         prevPotRef.current = 0
+        if (handNumber !== -1) {
+          setTimeout(() => syncViewerCards(handNumber), 100)
+        }
       }
       if (ev.type === 'BettingRoundCompleted') {
         potUpdateDelayRef.current = Date.now() + 850
@@ -338,12 +472,31 @@ export default function GamePage() {
         if (winnerPlayer != null) {
           setPotToWinner(winnerPlayer.seatIndex)
           setTimeout(() => setPotToWinner(null), 1200)
+          awardAnimQueueRef.current.push({
+            seatIndex: winnerPlayer.seatIndex,
+            amount: d.amount ?? 0,
+            label: d.isSidePot ? 'Side Pot' : 'Pot',
+            isSidePot: Boolean(d.isSidePot),
+          })
+          playNextAwardAnim()
         }
         const playerName = (id: string) => gs?.players.find(p => p.id === id)?.displayName ?? id
-        setLastWinner(w =>
-          w ? { ...w, amount: w.amount + (d.amount ?? 0) } :
-          { name: playerName(d.winnerId), amount: d.amount ?? 0, rank: d.winningRank ?? null }
-        )
+        // Save name+rank now; correct net amount will arrive via HandFinished
+        setLastWinner(w => w ?? { name: playerName(d.winnerId), amount: 0, rank: d.winningRank ?? null })
+      }
+      if (ev.type === 'HandFinished') {
+        const d = ev.data ?? {}
+        const gs = gameStateRef.current
+        const deltas: Record<string, number> = d.chipDeltas ?? {}
+        const positive = Object.entries(deltas).filter(([, v]) => Number(v) > 0)
+        if (positive.length > 0) {
+          const [winnerId, amount] = positive.sort((a, b) => Number(b[1]) - Number(a[1]))[0]
+          const playerName = (id: string) => gs?.players.find(p => p.id === id)?.displayName ?? id
+          setLastWinner(w =>
+            w ? { ...w, amount: Number(amount) }
+              : { name: playerName(winnerId), amount: Number(amount), rank: null }
+          )
+        }
       }
     },
     (id) => gameStateRef.current?.players.find(p => p.id === id)?.displayName ?? id,
@@ -355,23 +508,11 @@ export default function GamePage() {
     if (!gameState || !BETTING_PHASES.has(gameState.phase)) return
     if (myCardsRef.current?.hand === gameState.handNumber) return
     if (fetchedHandRef.current === gameState.handNumber) return
-    fetchedHandRef.current = gameState.handNumber
-    getGameState(tableId).then((s) => {
-      const me = s.players.find((p) => p.holeCards.length > 0)
-      if (me) {
-        myCardsRef.current = { hand: s.handNumber, seat: me.seatIndex, cards: me.holeCards }
-        setGameState((prev) => {
-          if (!prev || prev.handNumber !== s.handNumber) return prev
-          return {
-            ...prev,
-            players: prev.players.map((p) =>
-              p.seatIndex === me.seatIndex ? { ...p, holeCards: me.holeCards } : p
-            ),
-          }
-        })
-      }
-    }).catch(() => {})
-  }, [tableId, gameState?.handNumber])
+
+    clearViewerCardsRetry()
+    syncViewerCards(gameState.handNumber)
+    return clearViewerCardsRetry
+  }, [tableId, gameState?.handNumber, gameState?.phase])
 
   // Refresh table info when hand changes
   useEffect(() => {
@@ -433,6 +574,7 @@ export default function GamePage() {
     if (!silent) setError('')
     try {
       const next = await submitAction(tableId, type, amount)
+      stashViewerCards(next)
       setGameState(next)
     } catch (err: any) {
       if (!silent) setError(err.response?.data?.error ?? 'Action failed')
@@ -444,6 +586,7 @@ export default function GamePage() {
   async function handleStartHand(silent = false) {
     try {
       const next = await startHand(tableId)
+      stashViewerCards(next)
       setGameState(next)
     } catch (err: any) {
       if (!silent) setError(err.response?.data?.error ?? 'Could not start hand')
@@ -486,6 +629,16 @@ export default function GamePage() {
       setStatsModal(true)
     } catch {
       setError('Could not load statistics')
+    }
+  }
+
+  async function handlePause() {
+    setPauseModal(false)
+    setError('')
+    try {
+      setTable(await pauseTable(tableId, pauseMinutes))
+    } catch (err: any) {
+      setError(err.response?.data?.error ?? 'Could not pause table')
     }
   }
 
@@ -536,10 +689,40 @@ export default function GamePage() {
   const minBuyIn = (table?.bigBlind ?? 10) * 20
   const maxBuyIn = (table?.bigBlind ?? 10) * 1000
 
+  useEffect(() => {
+    if (pauseTimerRef.current) {
+      clearInterval(pauseTimerRef.current)
+      pauseTimerRef.current = null
+    }
+    const until = table?.pausedUntil ? new Date(table.pausedUntil).getTime() : 0
+    if (!until) {
+      setPauseRemaining(0)
+      return
+    }
+    const update = () => setPauseRemaining(Math.max(0, Math.ceil((until - Date.now()) / 1000)))
+    update()
+    pauseTimerRef.current = setInterval(update, 1000)
+    return () => {
+      if (pauseTimerRef.current) {
+        clearInterval(pauseTimerRef.current)
+        pauseTimerRef.current = null
+      }
+    }
+  }, [table?.pausedUntil])
+
+  const isPauseActive = pauseRemaining > 0
+  const formatDuration = (totalSeconds: number) => {
+    const minutes = Math.floor(totalSeconds / 60)
+    const seconds = totalSeconds % 60
+    return minutes > 0 ? `${minutes}m ${seconds.toString().padStart(2, '0')}s` : `${seconds}s`
+  }
+
   const seatedCount = hasGameState
     ? players.filter((p) => p.chips > 0).length
     : (table?.seats ?? []).length
   const isGameOver = phase === 'FINISHED' && seatedCount < 2
+  const potParts = gameState?.pots ?? []
+  const hasSidePots = potParts.length > 1
 
   const raiseAction = actions?.actions.find((a) => a.type === 'RAISE')
   const myChips = myPlayer?.chips ?? table?.seats?.find((s) => s.username === username)?.chips ?? 0
@@ -667,8 +850,16 @@ export default function GamePage() {
                 </button>
               )}
               {isStaff && (
+                <button
+                  onClick={() => setPauseModal(true)}
+                  className={`px-3 py-1 rounded-lg text-xs font-semibold transition ${isPauseActive ? 'bg-indigo-700 hover:bg-indigo-600' : 'bg-indigo-800 hover:bg-indigo-700'}`}
+                >
+                  ? {isPauseActive ? `Paused ${formatDuration(pauseRemaining)}` : 'Pause'}
+                </button>
+              )}
+              {isStaff && (
                 <button onClick={handleCloseTable} className="bg-red-800 hover:bg-red-700 px-3 py-1 rounded-lg text-xs font-semibold transition">
-                  ⏹ Close table
+                  ? Close table
                 </button>
               )}
             </div>
@@ -677,7 +868,7 @@ export default function GamePage() {
           {/* Poker table */}
           <div className="relative w-full" style={{ maxWidth: 760, aspectRatio: '16/9' }}>
             <div
-              className="absolute flex flex-col items-center justify-center gap-2"
+              className="absolute"
               style={{
                 left: '10%', top: '8%', width: '80%', height: '84%',
                 borderRadius: '50%',
@@ -685,37 +876,60 @@ export default function GamePage() {
                 border: '10px solid #7c3d12',
                 boxShadow: '0 4px 32px rgba(0,0,0,.8), inset 0 0 40px rgba(0,0,0,.4)',
                 pointerEvents: 'none',
+                overflow: 'hidden',
               }}
             >
-              <span className="text-green-300 text-xs font-semibold tracking-widest uppercase opacity-60">
+              {/* Phase label */}
+              <span
+                className="absolute text-green-300 text-xs font-semibold tracking-widest uppercase opacity-60"
+                style={{ top: '14%', left: '50%', transform: 'translateX(-50%)', whiteSpace: 'nowrap' }}
+              >
                 {phase.replace('_', ' ')}
               </span>
+              {/* Total pot — above cards */}
               {pot > 0 && (
-                <div className="bg-black/50 rounded-full px-3 py-0.5">
-                  <span className="text-yellow-300 text-sm font-bold">Total pot: {pot}</span>
+                <div
+                  className="absolute bg-black/50 rounded-full px-3 py-0.5"
+                  style={{ top: '26%', left: '50%', transform: 'translateX(-50%)', whiteSpace: 'nowrap' }}
+                >
+                  <span className="text-yellow-300 text-sm font-bold">Pot: {pot}</span>
                 </div>
               )}
-              <div className="flex gap-1 min-h-[72px] items-center">
-                {community.length > 0
-                  ? community.map((c, i) => <PlayingCard key={i} {...c} />)
-                  : <span className="text-green-800 text-xs">Waiting for cards…</span>}
+              {/* Community cards — always centered */}
+              <div
+                className="absolute flex gap-1 items-center"
+                style={{ left: '50%', top: '50%', transform: 'translate(-50%, -50%)' }}
+              >
+                {community.map((c, i) => <PlayingCard key={i} {...c} />)}
               </div>
+              {/* Pot chip pile sweep animation */}
               {potBreakdown.length > 0 && (
                 <div
+                  className="absolute flex items-center gap-2"
                   style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 8,
-                    marginTop: 4,
+                    bottom: '22%', left: '50%',
+                    transform: sweepingToPot ? 'translateX(-50%) scale(0.8)' : 'translateX(-50%) scale(1)',
                     transition: sweepingToPot ? 'opacity 0.6s ease-in, transform 0.6s ease-in' : 'none',
                     opacity: sweepingToPot ? 0 : 1,
-                    transform: sweepingToPot ? 'translateY(-12px) scale(0.8)' : 'translateY(0) scale(1)',
                   }}
                 >
-                  <span style={{ color: '#fde68a', fontSize: 13, fontWeight: 'bold', whiteSpace: 'nowrap' }}>
-                    pot: {potBreakdown.reduce((s, c) => s + c.denom.value * c.count, 0)}
-                  </span>
                   <ChipPile stacks={potBreakdown} chipW={26} />
+                </div>
+              )}
+              {/* Side pots — only shown when someone is ALL_IN */}
+              {hasSidePots && (
+                <div
+                  className="absolute flex flex-wrap items-center justify-center gap-1"
+                  style={{ bottom: '12%', left: '50%', transform: 'translateX(-50%)', maxWidth: '60%' }}
+                >
+                  {potParts.slice(1).map((part) => (
+                    <span
+                      key={part.index}
+                      className="bg-black/50 rounded-full px-2 py-0.5 text-yellow-200 text-[10px] font-bold whitespace-nowrap"
+                    >
+                      {part.label}: {part.amount}
+                    </span>
+                  ))}
                 </div>
               )}
             </div>
@@ -818,6 +1032,32 @@ export default function GamePage() {
                   })}
                 </>
             }
+            {/* Award chip animation — single motion from center to winner, then fade */}
+            {awardAnim && (() => {
+              const winnerPos = getSeatPos(awardAnim.seatIndex, maxPlayers)
+              const start = { left: '50%', top: '50%' }
+              const end = { left: winnerPos.left, top: winnerPos.top }
+              const stylePos = awardAnim.stage === 'hold' ? start : end
+              const opacity = awardAnim.stage === 'fade' ? 0 : 1
+              return (
+                <div
+                  className="absolute flex flex-col items-center gap-0.5 pointer-events-none"
+                  style={{
+                    left: stylePos.left,
+                    top: stylePos.top,
+                    transform: 'translate(-50%, -50%)',
+                    transition: 'left 0.8s cubic-bezier(.2,.9,.2,1), top 0.8s cubic-bezier(.2,.9,.2,1), opacity 0.4s ease',
+                    opacity,
+                    zIndex: 30,
+                  }}
+                >
+                  <ChipPile amount={awardAnim.amount} chipW={24} />
+                  <span className="text-yellow-100 text-[9px] font-bold bg-black/75 px-1 rounded leading-tight whitespace-nowrap">
+                    {awardAnim.label} {awardAnim.amount}
+                  </span>
+                </div>
+              )
+            })()}
           </div>
 
           {error && <p className="text-red-400 text-sm">{error}</p>}
@@ -833,6 +1073,12 @@ export default function GamePage() {
               {isGameOver && (
                 <div className="text-gray-400 text-sm pt-1">Game over — no chips left for next hand</div>
               )}
+            </div>
+          )}
+
+          {isPauseActive && (
+            <div className="w-full max-w-lg bg-indigo-900/50 border border-indigo-700 rounded-xl px-4 py-3 text-sm text-indigo-100 shadow-lg text-center">
+              Table paused ? resumes in {formatDuration(pauseRemaining)}
             </div>
           )}
 
@@ -964,6 +1210,57 @@ export default function GamePage() {
               </button>
               <button
                 onClick={() => setBuyInModal(null)}
+                className="flex-1 bg-gray-700 hover:bg-gray-600 py-2 rounded-lg font-semibold transition"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Pause modal */}
+      {pauseModal && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center" style={{ zIndex: 9999 }}>
+          <div className="bg-gray-900 border border-gray-700 rounded-xl p-6 w-80 space-y-4 shadow-2xl relative">
+            <button
+              onClick={() => setPauseModal(false)}
+              className="absolute top-3 right-3 text-gray-500 hover:text-gray-300 text-xl leading-none"
+              aria-label="Close pause modal"
+            >
+              ?
+            </button>
+            <h2 className="text-lg font-semibold pr-6">Pause table</h2>
+            <p className="text-sm text-gray-400">Choose how long the table will be paused for everyone.</p>
+            <div className="space-y-1">
+              <label className="text-xs text-gray-400">Minutes (1?10)</label>
+              <input
+                type="number"
+                min={1}
+                max={10}
+                value={pauseMinutes}
+                onChange={(e) => setPauseMinutes(Math.max(1, Math.min(10, Number(e.target.value) || 1)))}
+                className="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-indigo-500"
+              />
+              <input
+                type="range"
+                min={1}
+                max={10}
+                step={1}
+                value={pauseMinutes}
+                onChange={(e) => setPauseMinutes(Number(e.target.value))}
+                className="w-full accent-indigo-500"
+              />
+            </div>
+            <div className="flex gap-3">
+              <button
+                onClick={handlePause}
+                className="flex-1 bg-indigo-600 hover:bg-indigo-700 py-2 rounded-lg font-semibold transition"
+              >
+                Pause
+              </button>
+              <button
+                onClick={() => setPauseModal(false)}
                 className="flex-1 bg-gray-700 hover:bg-gray-600 py-2 rounded-lg font-semibold transition"
               >
                 Cancel

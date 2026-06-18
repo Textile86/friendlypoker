@@ -40,6 +40,14 @@ public abstract class AbstractBettingPhaseHandler implements PhaseHandler {
             return advancePhase(next, events);
         }
 
+        // Safety: if currentPlayer can't act (e.g. SITTING_OUT via firstToAct fallback),
+        // advance the turn pointer so the game doesn't freeze.
+        if (next.phase().isBettingPhase() && !next.currentPlayer().status().canAct()) {
+            next = PlayerTurnManager.advanceTurn(next);
+            if (next.isOnlyOnePlayerLeft()) return handleLastPlayerStanding(next, events);
+            if (next.isBettingRoundComplete()) return advancePhase(next, events);
+        }
+
         return GameResult.of(next, events);
     }
 
@@ -59,8 +67,9 @@ public abstract class AbstractBettingPhaseHandler implements PhaseHandler {
                 .withPot(Pot.empty());
         events.add(new GameEvent.PotAwarded(
                 state.tableId(), winner.id(), potTotal, false, null));
+        int netGain = potTotal - winner.totalBet();
         events.add(new GameEvent.HandFinished(
-                state.tableId(), state.handNumber(), Map.of(winner.id(), potTotal)));
+                state.tableId(), state.handNumber(), Map.of(winner.id(), netGain)));
         return GameResult.of(finished, events);
     }
 

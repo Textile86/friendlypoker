@@ -15,6 +15,13 @@ export interface PlayerView {
   holeCards: CardView[]
 }
 
+export interface PotView {
+  label: string
+  amount: number
+  sidePot: boolean
+  index: number
+}
+
 export interface GameStateView {
   tableId: number
   handNumber: number
@@ -22,6 +29,7 @@ export interface GameStateView {
   players: PlayerView[]
   potTotal: number
   currentBet: number
+  pots: PotView[]
   communityCards: CardView[]
   dealerIndex: number
   currentPlayerIndex: number

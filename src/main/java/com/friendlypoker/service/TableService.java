@@ -10,6 +10,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -83,15 +84,12 @@ public class TableService {
         ClubMember member = clubMemberRepository.findByClubIdAndUserId(table.getClub().getId(), user.getId())
                 .orElseThrow(() -> new IllegalArgumentException("You are not member of this club"));
 
-        if (table.getStatus() == TableStatus.CLOSED) {
-            throw new IllegalArgumentException("Table is closed");
-        }
 
         if (seatRepository.existsByTableIdAndUserId(tableId, user.getId())) {
             throw new IllegalArgumentException("You are already seated at this table");
         }
 
-        List<TableSeat> currentSeats = seatRepository.findByTableId(tableId);
+        List<TableSeat> currentSeats = new ArrayList<>(seatRepository.findByTableId(tableId));
         if (currentSeats.size() >= table.getMaxPlayers()) {
             throw new IllegalArgumentException("Table is full");
         }

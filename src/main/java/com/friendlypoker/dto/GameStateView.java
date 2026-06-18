@@ -2,9 +2,12 @@ package com.friendlypoker.dto;
 
 import com.friendlypoker.engine.domain.model.Card;
 import com.friendlypoker.engine.domain.model.GameState;
+import com.friendlypoker.engine.domain.model.SidePot;
+import com.friendlypoker.engine.engine.pot.PotCalculator;
 import com.friendlypoker.engine.domain.model.enums.GamePhase;
 import com.friendlypoker.engine.domain.model.enums.PlayerStatus;
 
+import java.util.ArrayList;
 import java.util.List;
 
 public record GameStateView(
@@ -14,6 +17,7 @@ public record GameStateView(
         List<PlayerView> players,
         int potTotal,
         int currentBet,
+        List<PotView> pots,
         List<CardView> communityCards,
         int dealerIndex,
         int currentPlayerIndex
@@ -32,6 +36,13 @@ public record GameStateView(
             int currentBet,
             int seatIndex,
             List<CardView> holeCards
+    ) {}
+
+    public record PotView(
+            String label,
+            int amount,
+            boolean sidePot,
+            int index
     ) {}
 
     public static GameStateView from(Long tableId, GameState state, String viewerPlayerId) {
@@ -60,6 +71,18 @@ public record GameStateView(
                 ? state.communityCards().stream().map(CardView::from).toList()
                 : List.of();
 
+        List<PotView> potViews = new ArrayList<>();
+        List<SidePot> calculatedPots = PotCalculator.calculate(state.players());
+        for (int i = 0; i < calculatedPots.size(); i++) {
+            SidePot pot = calculatedPots.get(i);
+            potViews.add(new PotView(
+                    i == 0 ? "Main Pot" : "Side Pot " + i,
+                    pot.amount(),
+                    i > 0,
+                    i
+            ));
+        }
+
         return new GameStateView(
                 tableId,
                 state.handNumber(),
@@ -67,6 +90,7 @@ public record GameStateView(
                 players,
                 state.pot().total(),
                 state.pot().currentBet(),
+                potViews,
                 community,
                 state.dealerIndex(),
                 state.currentPlayerIndex()

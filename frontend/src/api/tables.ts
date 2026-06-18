@@ -19,6 +19,7 @@ export interface TableResponse {
   actionTimeoutSecs: number
   variant: string
   status: string
+  pausedUntil?: string | null
   myRole?: string
   seats: SeatInfo[]
 }
@@ -62,6 +63,9 @@ export const getTableStatistics = (tableId: number) =>
 
 export const closeTable = (tableId: number) =>
   api.post(`/tables/${tableId}/close`)
+
+export const pauseTable = (tableId: number, minutes: number) =>
+  api.post<TableResponse>(`/tables/${tableId}/pause`, { minutes }).then((r) => r.data)
 
 export const sitOut = (tableId: number) =>
   api.post(`/tables/${tableId}/sit-out`)

@@ -45,4 +45,7 @@ public class PokerTable {
 
     @CreationTimestamp
     private Instant createdAt;
+
+    @Column
+    private Instant pausedUntil;
 }

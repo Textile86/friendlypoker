@@ -22,10 +22,13 @@ import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -43,6 +46,8 @@ public class GameService {
     private final ClubMemberRepository clubMemberRepository;
 
     private final ScheduledExecutorService allInScheduler = Executors.newScheduledThreadPool(2);
+    // Per-table lock to prevent concurrent startHand calls (e.g. all 3 browsers firing at once)
+    private final ConcurrentHashMap<Long, Object> startHandLocks = new ConcurrentHashMap<>();
 
     public GameStateView processAction(Long tableId, ActionRequest req, String username) {
         GameSession session = sessionManager.get(tableId);
@@ -86,17 +91,25 @@ public class GameService {
 
         boolean isAllInRunout = finished && !cardEvents.isEmpty();
 
+        GameStateView responseView;
         if (isAllInRunout) {
+            List<Card> baseCards = new ArrayList<>(result.newState().communityCards().subList(0, initialCardCount));
+            responseView = GameStateView.from(
+                    tableId,
+                    result.newState().withPhase(GamePhase.SHOWDOWN).withCommunityCards(baseCards),
+                    null
+            );
             finishGame(tableId, result);
             scheduleAllInRunout(tableId, result, cardEvents, initialCardCount);
         } else {
+            responseView = GameStateView.from(tableId, result.newState(), playerId);
             broadcast(tableId, result);
             if (finished) {
                 finishGame(tableId, result);
             }
         }
 
-        return GameStateView.from(tableId, result.newState(), playerId);
+        return responseView;
     }
 
     @Transactional
@@ -124,6 +137,10 @@ public class GameService {
         });
     }
 
+    private boolean isPauseActive(PokerTable table) {
+        return table.getPausedUntil() != null && table.getPausedUntil().isAfter(Instant.now());
+    }
+
     @Transactional
     public GameStateView startHand(Long tableId, String username) {
         PokerTable table = tableRepository.findById(tableId)
@@ -131,6 +148,9 @@ public class GameService {
 
         if (table.getStatus() == TableStatus.CLOSED) {
             throw new IllegalStateException("Table is closed");
+        }
+        if (isPauseActive(table)) {
+            throw new IllegalStateException("Table is paused");
         }
 
         User caller = userRepository.findByUsername(username)
@@ -146,74 +166,87 @@ public class GameService {
             throw new IllegalStateException("Not enough players");
         }
 
-        // Reuse FINISHED session for dealer rotation — but only when players haven't changed
-        GameSession existingSession = sessionManager.get(tableId);
-        if (existingSession != null && existingSession.getState().phase() == GamePhase.FINISHED) {
-            GameState existingState = existingSession.getState();
-            Set<String> seatIds = seats.stream()
-                    .map(s -> s.getUser().getId().toString())
-                    .collect(Collectors.toSet());
-            Set<String> sessionPlayerIds = existingState.players().stream()
-                    .map(PlayerState::id)
-                    .collect(Collectors.toSet());
-
-            if (seatIds.equals(sessionPlayerIds)) {
-                // Same players — sync chips from DB and reuse (dealer index rotates correctly)
-                for (TableSeat seat : seats) {
-                    String pid = seat.getUser().getId().toString();
-                    existingState.findPlayer(pid).ifPresent(p ->
-                            existingSession.setState(existingSession.getState().replacePlayer(
-                                    p.withChips(seat.getChips()).withSeatIndex(seat.getSeatIndex())))
-                    );
+        // Serialize concurrent startHand calls for the same table (all 3 browsers fire at once)
+        Object tableLock = startHandLocks.computeIfAbsent(tableId, k -> new Object());
+        synchronized (tableLock) {
+            // If a hand is already in progress, the first caller started it — return current state
+            GameSession inProgress = sessionManager.get(tableId);
+            if (inProgress != null) {
+                GamePhase inProgressPhase = inProgress.getState().phase();
+                if (inProgressPhase != GamePhase.WAITING && inProgressPhase != GamePhase.FINISHED) {
+                    return GameStateView.from(tableId, inProgress.getState(), caller.getId().toString());
                 }
-                GameResult result = existingSession.startHand();
-                GameLogger.logStartHand(tableId, result.newState());
-                GameLogger.logResult(tableId, result);
-                table.setStatus(TableStatus.ACTIVE);
-                tableRepository.save(table);
-                broadcast(tableId, result);
-                return GameStateView.from(tableId, result.newState(), caller.getId().toString());
             }
-            // Players changed — fall through to fresh session
-        }
 
-        GameConfig config = new GameConfig(
-                table.getSmallBlind(),
-                table.getBigBlind(),
-                table.getMinPlayers(),
-                table.getMaxPlayers(),
-                table.getStartingChips(),
-                table.getActionTimeoutSecs()
-        );
+            // Reuse FINISHED session for dealer rotation — but only when players haven't changed
+            GameSession existingSession = sessionManager.get(tableId);
+            if (existingSession != null && existingSession.getState().phase() == GamePhase.FINISHED) {
+                GameState existingState = existingSession.getState();
+                Set<String> seatIds = seats.stream()
+                        .map(s -> s.getUser().getId().toString())
+                        .collect(Collectors.toSet());
+                Set<String> sessionPlayerIds = existingState.players().stream()
+                        .map(PlayerState::id)
+                        .collect(Collectors.toSet());
 
-        GameEngine engine = GameEngineFactory.create();
-        GameState state = engine.createGame(tableId.toString(), config);
+                if (seatIds.equals(sessionPlayerIds)) {
+                    // Same players — sync chips from DB and reuse (dealer index rotates correctly)
+                    for (TableSeat seat : seats) {
+                        String pid = seat.getUser().getId().toString();
+                        existingState.findPlayer(pid).ifPresent(p ->
+                                existingSession.setState(existingSession.getState().replacePlayer(
+                                        p.withChips(seat.getChips()).withSeatIndex(seat.getSeatIndex())))
+                        );
+                    }
+                    GameResult result = existingSession.startHand();
+                    GameLogger.logStartHand(tableId, result.newState());
+                    GameLogger.logResult(tableId, result);
+                    table.setStatus(TableStatus.ACTIVE);
+                    tableRepository.save(table);
+                    broadcast(tableId, result);
+                    return GameStateView.from(tableId, result.newState(), caller.getId().toString());
+                }
+                // Players changed — fall through to fresh session
+            }
 
-        for (TableSeat seat : seats) {
-            GameResult r = engine.addPlayer(
-                    state,
-                    seat.getUser().getId().toString(),
-                    seat.getUser().getUsername()
+            GameConfig config = new GameConfig(
+                    table.getSmallBlind(),
+                    table.getBigBlind(),
+                    table.getMinPlayers(),
+                    table.getMaxPlayers(),
+                    table.getStartingChips(),
+                    table.getActionTimeoutSecs()
             );
-            state = r.newState();
-            PlayerState p = state.findPlayer(seat.getUser().getId().toString()).get();
-            state = state.replacePlayer(p.withChips(seat.getChips()).withSeatIndex(seat.getSeatIndex()));
+
+            GameEngine engine = GameEngineFactory.create();
+            GameState state = engine.createGame(tableId.toString(), config);
+
+            for (TableSeat seat : seats) {
+                GameResult r = engine.addPlayer(
+                        state,
+                        seat.getUser().getId().toString(),
+                        seat.getUser().getUsername()
+                );
+                state = r.newState();
+                PlayerState p = state.findPlayer(seat.getUser().getId().toString()).get();
+                state = state.replacePlayer(p.withChips(seat.getChips()).withSeatIndex(seat.getSeatIndex()));
+            }
+
+            sessionManager.remove(tableId);
+            GameSession session = new GameSession(engine, state);
+            sessionManager.getOrCreate(tableId, session);
+
+            GameResult result = session.startHand();
+
+            GameLogger.logStartHand(tableId, result.newState());
+            GameLogger.logResult(tableId, result);
+
+            table.setStatus(TableStatus.ACTIVE);
+            tableRepository.save(table);
+
+            broadcast(tableId, result);
+            return GameStateView.from(tableId, result.newState(), caller.getId().toString());
         }
-
-        sessionManager.remove(tableId);
-        GameSession session = new GameSession(engine, state);
-        sessionManager.getOrCreate(tableId, session);
-
-        GameResult result = session.startHand();
-
-        GameLogger.logStartHand(tableId, result.newState());
-        GameLogger.logResult(tableId, result);
-
-        table.setStatus(TableStatus.ACTIVE);
-        tableRepository.save(table);
-
-        broadcast(tableId, result);
-        return GameStateView.from(tableId, result.newState(), caller.getId().toString());
     }
 
     public GameStateView getState(Long tableId, String username) {
@@ -348,15 +381,51 @@ public class GameService {
         if (session != null) {
             GameResult result = session.leavePlayer(user.getId().toString());
             boolean finished = result.newState().phase() == GamePhase.FINISHED;
+            broadcast(tableId, result);  // always broadcast first — clients must not freeze
             if (finished) {
                 finishGame(tableId, result);
                 // Keep session alive — next startHand will detect player mismatch and do a fresh start
             }
-            broadcast(tableId, result);
         }
 
         seatRepository.delete(seat);
     }
+
+    @Transactional
+    public TableResponse pauseTable(Long tableId, String username, int minutes) {
+        if (minutes < 1 || minutes > 10) {
+            throw new IllegalArgumentException("Pause must be between 1 and 10 minutes");
+        }
+
+        PokerTable table = tableRepository.findById(tableId)
+                .orElseThrow(() -> new IllegalArgumentException("Table not found"));
+
+        User user = userRepository.findByUsername(username)
+                .orElseThrow(() -> new IllegalStateException("User not found"));
+
+        ClubMember member = clubMemberRepository.findByClubIdAndUserId(table.getClub().getId(), user.getId())
+                .orElseThrow(() -> new IllegalArgumentException("Access denied"));
+
+        if (member.getRole() == ClubRole.MEMBER) {
+            throw new IllegalArgumentException("Only owners and admins can pause the table");
+        }
+
+        Instant pausedUntil = Instant.now().plus(Duration.ofMinutes(minutes));
+        table.setPausedUntil(pausedUntil);
+        tableRepository.save(table);
+
+        messaging.convertAndSend(
+                "/topic/tables/" + tableId + "/events",
+                new GameEventView("TablePaused", Map.of(
+                        "tableId", tableId,
+                        "minutes", minutes,
+                        "pausedUntil", pausedUntil.toString()
+                ))
+        );
+
+        return TableResponse.from(table, seatRepository.findByTableId(tableId), member.getRole());
+    }
+
 
     @Transactional
     public void closeTable(Long tableId, String username) {

@@ -94,12 +94,16 @@ public class GameEngineImpl implements GameEngine {
         int dealerIdx = nextDealerIndex(state);
 
         List<PlayerState> resetPlayers = state.players().stream()
-                .map(p -> p.chips() > 0
-                        ? p.withStatus(PlayerStatus.ACTIVE)
-                        .withHoleCards(List.of())
-                        .resetRoundBet()
-                        .withTotalBet(0)
-                        : p.withStatus(PlayerStatus.SITTING_OUT))
+                .map(p -> {
+                    if (p.chips() <= 0) return p.withStatus(PlayerStatus.SITTING_OUT);
+                    if (p.status() == PlayerStatus.SITTING_OUT) {
+                        return p.withHoleCards(List.of()).resetRoundBet().withTotalBet(0);
+                    }
+                    return p.withStatus(PlayerStatus.ACTIVE)
+                            .withHoleCards(List.of())
+                            .resetRoundBet()
+                            .withTotalBet(0);
+                })
                 .toList();
 
         GameState next = new GameState(

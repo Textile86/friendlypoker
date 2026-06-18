@@ -1,6 +1,7 @@
 package com.friendlypoker.service;
 
 import com.friendlypoker.dto.CreateTableRequest;
+import com.friendlypoker.dto.SitDownRequest;
 import com.friendlypoker.model.*;
 import com.friendlypoker.repository.*;
 import org.junit.jupiter.api.DisplayName;
@@ -46,21 +47,18 @@ class TableServiceTest {
     }
 
     @Test
-    @DisplayName("Cannot sit at ACTIVE table")
-    void sitDown_tableActive_throwsException() {
+    @DisplayName("Can sit at ACTIVE table if a slot is free")
+    void sitDown_tableActive_allowedWhenSlotFree() {
         User user = makeUser(1L, "alice");
         PokerTable table = makeTable(1L, TableStatus.ACTIVE, 6);
 
         when(userRepository.findByUsername("alice")).thenReturn(Optional.of(user));
         when(tableRepository.findById(1L)).thenReturn(Optional.of(table));
-        ClubMember member = new ClubMember();
-        member.setRole(ClubRole.MEMBER); // или нужная роль
-        when(clubMemberRepository.findByClubIdAndUserId(anyLong(), anyLong()))
-                .thenReturn(Optional.of(member));
+        when(clubMemberRepository.findByClubIdAndUserId(1L, 1L)).thenReturn(Optional.of(new ClubMember()));
+        when(seatRepository.existsByTableIdAndUserId(1L, 1L)).thenReturn(false);
+        when(seatRepository.findByTableId(1L)).thenReturn(List.of());
 
-        assertThatThrownBy(() -> tableService.sitDown(1L, "alice"))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("not accepting players");
+        tableService.sitDown(1L, "alice", new SitDownRequest(1000, 0));
     }
 
     @Test
@@ -71,10 +69,10 @@ class TableServiceTest {
 
         when(userRepository.findByUsername("alice")).thenReturn(Optional.of(user));
         when(tableRepository.findById(1L)).thenReturn(Optional.of(table));
-        when(clubMemberRepository.existsByClubIdAndUserId(1L, 1L)).thenReturn(true);
+        when(clubMemberRepository.findByClubIdAndUserId(1L, 1L)).thenReturn(Optional.of(new ClubMember()));
         when(seatRepository.existsByTableIdAndUserId(1L, 1L)).thenReturn(true);
 
-        assertThatThrownBy(() -> tableService.sitDown(1L, "alice"))
+        assertThatThrownBy(() -> tableService.sitDown(1L, "alice", new SitDownRequest(1000, 0)))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("already seated");
     }
@@ -87,11 +85,11 @@ class TableServiceTest {
 
         when(userRepository.findByUsername("alice")).thenReturn(Optional.of(user));
         when(tableRepository.findById(1L)).thenReturn(Optional.of(table));
-        when(clubMemberRepository.existsByClubIdAndUserId(1L, 1L)).thenReturn(true);
+        when(clubMemberRepository.findByClubIdAndUserId(1L, 1L)).thenReturn(Optional.of(new ClubMember()));
         when(seatRepository.existsByTableIdAndUserId(1L, 1L)).thenReturn(false);
         when(seatRepository.findByTableId(1L)).thenReturn(List.of(new TableSeat(), new TableSeat()));
 
-        assertThatThrownBy(() -> tableService.sitDown(1L, "alice"))
+        assertThatThrownBy(() -> tableService.sitDown(1L, "alice", new SitDownRequest(1000, 0)))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("full");
     }
@@ -108,6 +106,7 @@ class TableServiceTest {
         t.setId(id);
         t.setStatus(status);
         t.setMaxPlayers(maxPlayers);
+        t.setBigBlind(50);
         Club club = new Club();
         club.setId(1L);
         t.setClub(club);
