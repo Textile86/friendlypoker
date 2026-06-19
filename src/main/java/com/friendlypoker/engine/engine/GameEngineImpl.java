@@ -96,9 +96,8 @@ public class GameEngineImpl implements GameEngine {
         List<PlayerState> resetPlayers = state.players().stream()
                 .map(p -> {
                     if (p.chips() <= 0) return p.withStatus(PlayerStatus.SITTING_OUT);
-                    if (p.status() == PlayerStatus.SITTING_OUT) {
-                        return p.withHoleCards(List.of()).resetRoundBet().withTotalBet(0);
-                    }
+                    // SITTING_OUT players with chips get cards and become ACTIVE
+                    // (prevents permanent lock-out from timeout sitOut)
                     return p.withStatus(PlayerStatus.ACTIVE)
                             .withHoleCards(List.of())
                             .resetRoundBet()

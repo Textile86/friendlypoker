@@ -319,6 +319,7 @@ export default function GamePage() {
 
   const gameStateRef = useRef<GameStateView | null>(null)
   const communityCardsRef = useRef<CardView[]>([])
+  const eventsScrollRef = useRef<HTMLDivElement | null>(null)
   const pauseTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   // My cards (from personalized REST response), keyed by hand number
@@ -786,6 +787,22 @@ export default function GamePage() {
     return () => clearTimeout(timer)
   }, [phase]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ── Events sidebar scroll preservation ────────────────────────────────
+  // When new events are prepended, keep the user's scroll position stable.
+  // If the user was at the bottom, auto-scroll to the new bottom.
+  useEffect(() => {
+    const el = eventsScrollRef.current
+    if (!el) return
+    const wasAtBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40
+    // Use rAF to measure after React has painted the new DOM
+    const raf = requestAnimationFrame(() => {
+      if (wasAtBottom) {
+        el.scrollTop = el.scrollHeight
+      }
+    })
+    return () => cancelAnimationFrame(raf)
+  }, [events])
+
   // Re-buy prompt when player busts
   useEffect(() => {
     if (myPlayer?.chips === 0 && isSeated && phase === 'FINISHED') {
@@ -808,7 +825,7 @@ export default function GamePage() {
   const tableClosed = closedByOwner || table?.status === 'CLOSED'
 
   return (
-    <div className="min-h-screen bg-gray-950 text-white flex flex-col">
+    <div className="h-screen bg-gray-950 text-white flex flex-col overflow-hidden">
       <Navbar />
 
       {tableClosed && (
@@ -842,11 +859,11 @@ export default function GamePage() {
             </span>
             <div className="ml-auto flex items-center gap-2">
               <button onClick={openStats} className="bg-gray-700 hover:bg-gray-600 px-3 py-1 rounded-lg text-xs font-semibold transition">
-                📊 Stats
+                Stats
               </button>
               {isSeated && (
                 <button onClick={handleLeave} className="bg-gray-700 hover:bg-gray-600 px-3 py-1 rounded-lg text-xs font-semibold transition">
-                  🚪 Leave table
+                  Leave table
                 </button>
               )}
               {isStaff && (
@@ -1130,7 +1147,7 @@ export default function GamePage() {
                   onClick={() => { setSittingOut(false); consecutiveTimeoutsRef.current = 0; imBackAPI(tableId).catch(() => {}) }}
                   className="bg-yellow-600 hover:bg-yellow-700 px-6 py-2 rounded-lg font-semibold text-sm transition"
                 >
-                  🪑 I'm back
+                  I'm back
                 </button>
               </div>
             )}
@@ -1141,7 +1158,7 @@ export default function GamePage() {
                   onClick={() => { setShowCardsLeft(0); showCardsAPI(tableId).catch(() => {}) }}
                   className="bg-indigo-700 hover:bg-indigo-600 px-5 py-2 rounded-lg font-semibold text-sm transition"
                 >
-                  👁 Show Cards ({showCardsLeft}s)
+                  Show Cards ({showCardsLeft}s)
                 </button>
               </div>
             )}
@@ -1157,11 +1174,14 @@ export default function GamePage() {
         </div>
 
         {/* Events sidebar */}
-        <div className="w-52 bg-gray-900 border-l border-gray-800 flex flex-col text-xs">
-          <div className="px-3 py-2 border-b border-gray-800">
+        <div className="w-64 bg-gray-900 border-l border-gray-800 flex flex-col min-h-0 text-sm">
+          <div className="px-3 py-2 border-b border-gray-800 shrink-0">
             <span className="font-semibold text-gray-500 uppercase tracking-wide">Events</span>
           </div>
-          <div className="flex-1 overflow-y-auto p-2 space-y-1">
+          <div
+            ref={eventsScrollRef}
+            className="flex-1 min-h-0 overflow-y-auto p-2 space-y-1"
+          >
             {events.length === 0 ? (
               <p className="text-gray-700 text-center mt-4">No events yet</p>
             ) : (

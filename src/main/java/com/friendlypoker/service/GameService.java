@@ -8,8 +8,10 @@ import com.friendlypoker.engine.domain.model.GameConfig;
 import com.friendlypoker.engine.domain.model.GameResult;
 import com.friendlypoker.engine.domain.model.GameState;
 import com.friendlypoker.engine.domain.model.PlayerState;
+import com.friendlypoker.engine.domain.model.Pot;
 import com.friendlypoker.engine.domain.model.enums.ActionType;
 import com.friendlypoker.engine.domain.model.enums.GamePhase;
+import com.friendlypoker.engine.domain.model.enums.PlayerStatus;
 import com.friendlypoker.engine.engine.GameEngine;
 import com.friendlypoker.engine.engine.GameEngineFactory;
 import com.friendlypoker.game.GameLogger;
@@ -76,7 +78,8 @@ public class GameService {
             case ALL_IN -> GameAction.allIn(playerId, req.amount());
         };
 
-        int initialCardCount = session.getState().communityCards().size();
+        GameState stateBefore = session.getState();
+        int initialCardCount = stateBefore.communityCards().size();
         GameResult result = session.processAction(action);
 
         GameLogger.logAction(tableId, playerId, req.type(), req.amount());
@@ -102,8 +105,47 @@ public class GameService {
             finishGame(tableId, result);
             scheduleAllInRunout(tableId, result, cardEvents, initialCardCount);
         } else {
-            responseView = GameStateView.from(tableId, result.newState(), playerId);
-            broadcast(tableId, result);
+            // Split transition events (BettingRoundCompleted, PhaseChanged, CommunityCardDealt)
+            // from action events so the client sees the last player's action before the board updates.
+            List<GameEvent> transitionEvents = result.events().stream()
+                    .filter(e -> e instanceof GameEvent.BettingRoundCompleted
+                              || e instanceof GameEvent.PhaseChanged
+                              || e instanceof GameEvent.CommunityCardDealt)
+                    .toList();
+
+            if (!transitionEvents.isEmpty() && !finished) {
+                // Build intermediate state: apply action events only, keep old phase/board
+                GameState intermediate = buildIntermediateState(
+                        stateBefore, result, transitionEvents);
+
+                // 1. Send action events + intermediate state immediately
+                List<GameEvent> actionOnly = result.events().stream()
+                        .filter(e -> !(e instanceof GameEvent.BettingRoundCompleted)
+                                  && !(e instanceof GameEvent.PhaseChanged)
+                                  && !(e instanceof GameEvent.CommunityCardDealt))
+                        .toList();
+                GameResult actionResult = GameResult.of(intermediate, actionOnly);
+                broadcast(tableId, actionResult);
+
+                // 2. Schedule transition events + final state after a short delay
+                long delayMs = 1200;
+                allInScheduler.schedule(() -> {
+                    messaging.convertAndSend(
+                            "/topic/tables/" + tableId + "/state",
+                            GameStateView.from(tableId, result.newState(), null));
+                    transitionEvents.stream()
+                            .map(GameEventView::from)
+                            .forEach(view -> messaging.convertAndSend(
+                                    "/topic/tables/" + tableId + "/events", view));
+                }, delayMs, TimeUnit.MILLISECONDS);
+
+                // Return intermediate state so the caller sees their bet chip immediately
+                // but NOT the new board/phase — those come via delayed WS broadcast
+                responseView = GameStateView.from(tableId, intermediate, playerId);
+            } else {
+                responseView = GameStateView.from(tableId, result.newState(), playerId);
+                broadcast(tableId, result);
+            }
             if (finished) {
                 finishGame(tableId, result);
             }
@@ -266,6 +308,61 @@ public class GameService {
                 .map(PlayerState::id)
                 .findFirst()
                 .orElse(null);
+    }
+
+    /**
+     * Builds an intermediate state from the ORIGINAL state (before processAction),
+     * applying only the action events (PlayerActed, PlayerFolded) so the client
+     * sees bets/chips/pot update while keeping the old phase and community cards.
+     * The delayed WS broadcast then delivers the phase transition + new board.
+     */
+    private GameState buildIntermediateState(GameState original, GameResult result,
+                                              List<GameEvent> transitionEvents) {
+        GameState intermediate = original;
+        for (GameEvent event : result.events()) {
+            if (event instanceof GameEvent.PlayerFolded folded) {
+                PlayerState p = intermediate.findPlayer(folded.playerId()).orElseThrow();
+                intermediate = intermediate.replacePlayer(
+                        p.withStatus(PlayerStatus.FOLDED));
+            } else if (event instanceof GameEvent.PlayerActed acted) {
+                intermediate = applyPlayerActed(intermediate, acted);
+            }
+        }
+        return intermediate;
+    }
+
+    private GameState applyPlayerActed(GameState state, GameEvent.PlayerActed acted) {
+        PlayerState p = state.findPlayer(acted.playerId()).orElseThrow();
+        int additional;
+        PlayerState updated;
+        Pot pot = state.pot();
+
+        if (acted.actionType() == ActionType.CHECK) {
+            additional = 0;
+            updated = p.markActed();
+        } else if (acted.actionType() == ActionType.CALL) {
+            additional = acted.amount(); // amount IS the delta
+            updated = p.placeBet(additional).markActed();
+        } else if (acted.actionType() == ActionType.RAISE) {
+            additional = acted.amount() - p.currentBet(); // amount is total raise-to
+            updated = p.placeBet(additional).markActed();
+            pot = pot.withCurrentBet(acted.amount());
+        } else if (acted.actionType() == ActionType.ALL_IN) {
+            additional = acted.amount(); // amount IS the delta
+            updated = p.placeBet(additional)
+                    .withStatus(PlayerStatus.ALL_IN)
+                    .markActed();
+            int newBetLevel = p.currentBet() + additional;
+            if (newBetLevel > pot.currentBet()) {
+                pot = pot.withCurrentBet(newBetLevel);
+            }
+        } else {
+            return state; // FOLD — no state change (budget: handled by PlayerFolded above)
+        }
+
+        return state
+                .replacePlayer(updated)
+                .withPot(pot.addToMain(additional));
     }
 
     private void scheduleAllInRunout(Long tableId, GameResult result,
