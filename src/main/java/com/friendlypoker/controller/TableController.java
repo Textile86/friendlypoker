@@ -91,7 +91,7 @@ public class TableController {
             @RequestBody Map<String, Integer> body,
             @AuthenticationPrincipal UserDetails user) {
         int chips = body.getOrDefault("chips", 0);
-        TableResponse result = tableService.rebuy(id, user.getUsername(), chips);
+        TableResponse result = gameService.requestRebuy(id, user.getUsername(), chips);
         messaging.convertAndSend("/topic/tables/" + id + "/events",
                 new GameEventView("SeatsChanged", Map.of("tableId", id)));
         return ResponseEntity.ok(result);

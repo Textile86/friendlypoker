@@ -289,6 +289,8 @@ export default function GamePage() {
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [loading, setLoading] = useState(true)
+  const [animCards, setAnimCards] = useState<(CardView | null)[]>([null, null, null, null, null])
+  const animCardsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [sittingOut, setSittingOut] = useState(false)
   const consecutiveTimeoutsRef = useRef(0)
   const [showCardsLeft, setShowCardsLeft] = useState(0)
@@ -671,6 +673,7 @@ export default function GamePage() {
   const players = gameState?.players ?? []
   const phase = gameState?.phase ?? 'WAITING'
   const community = gameState?.communityCards ?? []
+  const communityKey = community.length === 0 ? '' : community.map(c => `${c.rank}-${c.suit}`).join(',')
   const pot = gameState?.potTotal ?? 0
   const dealerIdx = gameState?.dealerIndex ?? -1
   const currentIdx = gameState?.currentPlayerIndex ?? -1
@@ -721,7 +724,8 @@ export default function GamePage() {
   const seatedCount = hasGameState
     ? players.filter((p) => p.chips > 0).length
     : (table?.seats ?? []).length
-  const isGameOver = phase === 'FINISHED' && seatedCount < 2
+  const dbPlayersWithChips = (table?.seats ?? []).filter(s => s.chips > 0).length
+  const isGameOver = phase === 'FINISHED' && dbPlayersWithChips < 2
   const potParts = gameState?.pots ?? []
   const hasSidePots = potParts.length > 1
 
@@ -780,12 +784,15 @@ export default function GamePage() {
     return () => { if (showCardsTimerRef.current) { clearInterval(showCardsTimerRef.current); showCardsTimerRef.current = null } }
   }, [phase]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Auto-start next hand after FINISHED (5-second delay so winner banner is visible)
+  // Auto-start next hand after FINISHED (5-second delay so winner banner is visible).
+  // Count from table.seats (DB) — session players may not include late joiners.
   useEffect(() => {
-    if (phase !== 'FINISHED' || !isSeated || seatedCount < 2) return
+    if (phase !== 'FINISHED' || !isSeated) return
+    const playersWithChips = (table?.seats ?? []).filter(s => s.chips > 0).length
+    if (playersWithChips < 2) return
     const timer = setTimeout(() => handleStartHand(true), 5000)
     return () => clearTimeout(timer)
-  }, [phase]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [phase, table?.seats]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Events sidebar scroll preservation ────────────────────────────────
   // When new events are prepended, keep the user's scroll position stable.
@@ -861,6 +868,11 @@ export default function GamePage() {
               <button onClick={openStats} className="bg-gray-700 hover:bg-gray-600 px-3 py-1 rounded-lg text-xs font-semibold transition">
                 Stats
               </button>
+              {isSeated && (
+                <button onClick={() => { setRebuyAmount(table?.rebuyMin || minBuyIn); setRebuyModal(true) }} className="bg-emerald-700 hover:bg-emerald-600 px-3 py-1 rounded-lg text-xs font-semibold transition">
+                  Rebuy
+                </button>
+              )}
               {isSeated && (
                 <button onClick={handleLeave} className="bg-gray-700 hover:bg-gray-600 px-3 py-1 rounded-lg text-xs font-semibold transition">
                   Leave table
@@ -1293,23 +1305,36 @@ export default function GamePage() {
       {/* Re-buy modal */}
       {rebuyModal && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center" style={{ zIndex: 9999 }}>
-          <div className="bg-gray-900 border border-gray-700 rounded-xl p-6 w-80 space-y-4 shadow-2xl">
-            <h2 className="text-lg font-semibold">Re-Buy</h2>
-            <p className="text-sm text-gray-400">You have no chips left. Add more chips to continue playing.</p>
+          <div className="bg-gray-900 border border-gray-700 rounded-xl p-6 w-80 space-y-4 shadow-2xl relative">
+            <button
+              onClick={() => setRebuyModal(false)}
+              className="absolute top-3 right-3 text-gray-500 hover:text-gray-300 text-xl leading-none"
+              aria-label="Close rebuy modal"
+            >
+              ×
+            </button>
+            <h2 className="text-lg font-semibold pr-6">Re-Buy</h2>
+            {BETTING_PHASES.has(phase) && (
+              <p className="text-xs text-yellow-400 bg-yellow-900/30 rounded-lg px-3 py-2">
+                ⚠ Hand in progress — chips will be added after this hand finishes.
+              </p>
+            )}
             <div className="space-y-1">
-              <label className="text-xs text-gray-400">Amount (min {minBuyIn} / max {maxBuyIn})</label>
+              <label className="text-xs text-gray-400">
+                Amount ({table?.rebuyMin || minBuyIn} — {table?.rebuyMax || maxBuyIn} chips)
+              </label>
               <input
                 type="number"
-                min={minBuyIn}
-                max={maxBuyIn}
+                min={table?.rebuyMin || minBuyIn}
+                max={table?.rebuyMax || maxBuyIn}
                 value={rebuyAmount}
                 onChange={(e) => setRebuyAmount(Number(e.target.value))}
                 className="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-green-500"
               />
               <input
                 type="range"
-                min={minBuyIn}
-                max={maxBuyIn}
+                min={table?.rebuyMin || minBuyIn}
+                max={table?.rebuyMax || maxBuyIn}
                 step={table?.bigBlind ?? 10}
                 value={rebuyAmount}
                 onChange={(e) => setRebuyAmount(Number(e.target.value))}
@@ -1319,16 +1344,16 @@ export default function GamePage() {
             <div className="flex gap-3">
               <button
                 onClick={handleRebuy}
-                disabled={rebuyAmount < minBuyIn || rebuyAmount > maxBuyIn}
+                disabled={rebuyAmount < (table?.rebuyMin || minBuyIn) || rebuyAmount > (table?.rebuyMax || maxBuyIn)}
                 className="flex-1 bg-green-600 hover:bg-green-700 disabled:opacity-50 py-2 rounded-lg font-semibold transition"
               >
                 Re-Buy
               </button>
               <button
-                onClick={() => { setRebuyModal(false); handleLeave() }}
+                onClick={() => setRebuyModal(false)}
                 className="flex-1 bg-gray-700 hover:bg-gray-600 py-2 rounded-lg font-semibold transition"
               >
-                Leave Table
+                Cancel
               </button>
             </div>
           </div>

@@ -74,51 +74,8 @@ secrets.properties
 .clinerules
 CODEBUDDY.md
 
-# Test / debug / stress scripts (keep only in local dev)
-auto_test.sh
-register_test.sh
-run_stress_test.sh
-test_action.sh
-test_action_simple.sh
-stress_test.py
-stress_test_v3.py
-stress_test_v4.py
-stress_test_v5_advanced.py
-analyze_v4.sh
-cat_rules.sh
-ls_docs.sh
-tail_log.sh
-debug_api.sh
-debug_invite.py
-debug_invite2.sh
-debug_leave_400.py
-debug_leave_400b.py
-clear_db.sh
-clear_db.sql
-ping_test.sh
-test_api.sh
-check_env.sh
-check_api.sh
-check_nine_table.py
-diagnose.sh
-setup_3_players.sh
-stress_test_v6_mega.py
-test_leave_table.py
-test_leave_hard.py
-test_leave_race.py
-test_owner_leave.py
-три_топора.sh
-tri_topora.sh
-tri_topora_no_rebuild.sh
-
-# Bat-скрипты для ручного тестирования
-9_profiles.bat
-вишневая_девятка.sh
-tri_topora.bat
-вишневая_девятка_full.bat
-
-# Утилиты
-md_to_pdf.sh
+# Dev / debug / stress scripts (moved to .deepseek/)
+.deepseek/
 
 # Статические файлы визуализации
 static/

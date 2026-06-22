@@ -48,4 +48,20 @@ public class PokerTable {
 
     @Column
     private Instant pausedUntil;
+
+    // ── Rebuy settings ──
+    @Column(nullable = false)
+    private int rebuyMin = 0;
+
+    @Column(nullable = false)
+    private int rebuyMax = 0;
+
+    @Column(nullable = false)
+    private int rebuyCountMin = 0;
+
+    @Column(nullable = false)
+    private int rebuyCountMax = 10;
+
+    @Column(nullable = false)
+    private boolean rebuyUnlimited = false;
 }

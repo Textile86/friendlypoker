@@ -37,4 +37,7 @@ public class TableSeat {
     private int chips;
 
     private int totalBuyIn;
+
+    @Column(nullable = false)
+    private int rebuyCount = 0;
 }

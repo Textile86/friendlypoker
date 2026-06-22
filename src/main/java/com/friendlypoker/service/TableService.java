@@ -47,6 +47,11 @@ public class TableService {
         table.setMaxPlayers(req.maxPlayers());
         table.setStartingChips(req.startingChips());
         table.setActionTimeoutSecs(req.actionTimeoutSecs());
+        table.setRebuyMin(req.rebuyMin());
+        table.setRebuyMax(req.rebuyMax());
+        table.setRebuyCountMin(req.rebuyCountMin());
+        table.setRebuyCountMax(req.rebuyCountMax());
+        table.setRebuyUnlimited(req.rebuyUnlimited());
         table.setCreatedBy(user);
         tableRepository.save(table);
 
@@ -121,31 +126,6 @@ public class TableService {
 
         currentSeats.add(seat);
         return TableResponse.from(table, currentSeats, member.getRole());
-    }
-
-    @Transactional
-    public TableResponse rebuy(Long tableId, String username, int chips) {
-        User user = loadUser(username);
-        PokerTable table = loadTable(tableId);
-
-        ClubMember member = clubMemberRepository.findByClubIdAndUserId(table.getClub().getId(), user.getId())
-                .orElseThrow(() -> new IllegalArgumentException("Access denied"));
-
-        TableSeat seat = seatRepository.findByTableIdAndUserId(tableId, user.getId())
-                .orElseThrow(() -> new IllegalArgumentException("You are not seated at this table"));
-
-        int minBuyIn = table.getBigBlind() * 20;
-        int maxBuyIn = table.getBigBlind() * 1000;
-        if (chips < minBuyIn || chips > maxBuyIn) {
-            throw new IllegalArgumentException(
-                    "Buy-in must be between " + minBuyIn + " and " + maxBuyIn + " chips");
-        }
-
-        seat.setChips(seat.getChips() + chips);
-        seat.setTotalBuyIn(seat.getTotalBuyIn() + chips);
-        seatRepository.save(seat);
-
-        return TableResponse.from(table, seatRepository.findByTableId(tableId), member.getRole());
     }
 
     @Transactional(readOnly = true)

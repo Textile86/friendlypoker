@@ -50,6 +50,8 @@ public class GameService {
     private final ScheduledExecutorService allInScheduler = Executors.newScheduledThreadPool(2);
     // Per-table lock to prevent concurrent startHand calls (e.g. all 3 browsers firing at once)
     private final ConcurrentHashMap<Long, Object> startHandLocks = new ConcurrentHashMap<>();
+    // Pending rebuys: tableId -> (playerId -> chips). Applied when hand finishes.
+    private final ConcurrentHashMap<Long, Map<String, Integer>> pendingRebuys = new ConcurrentHashMap<>();
 
     public GameStateView processAction(Long tableId, ActionRequest req, String username) {
         GameSession session = sessionManager.get(tableId);
@@ -96,14 +98,23 @@ public class GameService {
 
         GameStateView responseView;
         if (isAllInRunout) {
-            List<Card> baseCards = new ArrayList<>(result.newState().communityCards().subList(0, initialCardCount));
-            responseView = GameStateView.from(
-                    tableId,
-                    result.newState().withPhase(GamePhase.SHOWDOWN).withCommunityCards(baseCards),
-                    null
-            );
-            finishGame(tableId, result);
+            // Build intermediate state from stateBefore so chips are NOT yet final
+            // (engine already awarded the pot — we hide that until showdown reveal completes)
+            List<GameEvent> actionOnly = result.events().stream()
+                    .filter(e -> e instanceof GameEvent.PlayerActed
+                              || e instanceof GameEvent.PlayerFolded)
+                    .toList();
+            GameState intermediate = buildIntermediateState(stateBefore, GameResult.of(stateBefore, actionOnly));
+
+            // 1. Send action events + intermediate state immediately (old chips, old board)
+            GameResult actionResult = GameResult.of(intermediate, actionOnly);
+            broadcast(tableId, actionResult);
+
+            // 2. Schedule all-in runout: cards → showdown → final state → finishGame
             scheduleAllInRunout(tableId, result, cardEvents, initialCardCount);
+
+            // Return intermediate state — no final chips visible yet
+            responseView = GameStateView.from(tableId, intermediate, playerId);
         } else {
             // Split transition events (BettingRoundCompleted, PhaseChanged, CommunityCardDealt)
             // from action events so the client sees the last player's action before the board updates.
@@ -116,7 +127,7 @@ public class GameService {
             if (!transitionEvents.isEmpty() && !finished) {
                 // Build intermediate state: apply action events only, keep old phase/board
                 GameState intermediate = buildIntermediateState(
-                        stateBefore, result, transitionEvents);
+                        stateBefore, result);
 
                 // 1. Send action events + intermediate state immediately
                 List<GameEvent> actionOnly = result.events().stream()
@@ -154,8 +165,8 @@ public class GameService {
         return responseView;
     }
 
-    @Transactional
-    public void finishGame(Long tableId, GameResult result) {
+        @Transactional
+        public void finishGame(Long tableId, GameResult result) {
         GameState finalState = result.newState();
 
         result.events().stream()
@@ -163,6 +174,28 @@ public class GameService {
                 .map(e -> (GameEvent.HandFinished) e)
                 .findFirst()
                 .ifPresent(e -> saveHandHistory(tableId, e));
+
+        // Apply pending rebuys
+        Map<String, Integer> tablePending = pendingRebuys.remove(tableId);
+        if (tablePending != null) {
+            List<TableSeat> seats = seatRepository.findByTableId(tableId);
+            for (TableSeat seat : seats) {
+                String dbId = seat.getUser().getId().toString();
+                Integer chips = tablePending.get(dbId);
+                if (chips != null && chips > 0) {
+                    seat.setChips(seat.getChips() + chips);
+                    seat.setTotalBuyIn(seat.getTotalBuyIn() + chips);
+                    seat.setRebuyCount(seat.getRebuyCount() + 1);
+                    seatRepository.save(seat);
+                    GameSession session = sessionManager.get(tableId);
+                    if (session != null) {
+                        session.getState().findPlayer(dbId).ifPresent(p ->
+                            session.setState(session.getState().replacePlayer(p.withChips(p.chips() + chips)))
+                        );
+                    }
+                }
+            }
+        }
 
         List<TableSeat> seats = seatRepository.findByTableId(tableId);
         for (TableSeat seat : seats) {
@@ -316,8 +349,7 @@ public class GameService {
      * sees bets/chips/pot update while keeping the old phase and community cards.
      * The delayed WS broadcast then delivers the phase transition + new board.
      */
-    private GameState buildIntermediateState(GameState original, GameResult result,
-                                              List<GameEvent> transitionEvents) {
+    private GameState buildIntermediateState(GameState original, GameResult result) {
         GameState intermediate = original;
         for (GameEvent event : result.events()) {
             if (event instanceof GameEvent.PlayerFolded folded) {
@@ -378,12 +410,6 @@ public class GameService {
         messaging.convertAndSend(stateTopic,
                 GameStateView.from(tableId, finalState.withPhase(GamePhase.SHOWDOWN).withCommunityCards(baseCards), null));
 
-        // Also broadcast the action events immediately (so the sidebar shows the all-in)
-        result.events().stream()
-                .filter(e -> e instanceof GameEvent.PlayerActed || e instanceof GameEvent.PlayerFolded)
-                .map(GameEventView::from)
-                .forEach(view -> messaging.convertAndSend(eventTopic, view));
-
         // Schedule each street reveal with 3-second gaps
         int delay = 3;
         int cardOffset = initialCardCount;
@@ -409,6 +435,7 @@ public class GameService {
                               && !(e instanceof GameEvent.PlayerFolded))
                     .map(GameEventView::from)
                     .forEach(view -> messaging.convertAndSend(eventTopic, view));
+            finishGame(tableId, result);
         }, finalDelay, TimeUnit.SECONDS);
     }
 
@@ -548,6 +575,57 @@ public class GameService {
                 "/topic/tables/" + tableId + "/events",
                 new GameEventView("TableClosed", Map.of("tableId", tableId))
         );
+    }
+
+    /**
+     * Requests a rebuy. If a hand is in progress and the player is seated (with cards or not),
+     * chips are added after the hand finishes. Otherwise applied immediately.
+     */
+    @Transactional
+    public TableResponse requestRebuy(Long tableId, String username, int chips) {
+        User user = userRepository.findByUsername(username)
+                .orElseThrow(() -> new IllegalStateException("User not found"));
+
+        PokerTable table = tableRepository.findById(tableId)
+                .orElseThrow(() -> new IllegalArgumentException("Table not found"));
+
+        ClubMember member = clubMemberRepository.findByClubIdAndUserId(table.getClub().getId(), user.getId())
+                .orElseThrow(() -> new IllegalArgumentException("Access denied"));
+
+        TableSeat seat = seatRepository.findByTableIdAndUserId(tableId, user.getId())
+                .orElseThrow(() -> new IllegalArgumentException("You are not seated at this table"));
+
+        int minBuyIn = table.getRebuyMin() > 0 ? table.getRebuyMin() : table.getBigBlind() * 20;
+        int maxBuyIn = table.getRebuyMax() > 0 ? table.getRebuyMax() : table.getBigBlind() * 1000;
+        if (chips < minBuyIn || chips > maxBuyIn) {
+            throw new IllegalArgumentException(
+                    "Rebuy must be between " + minBuyIn + " and " + maxBuyIn + " chips");
+        }
+
+        if (!table.isRebuyUnlimited()) {
+            int countMax = table.getRebuyCountMax();
+            int currentCount = seat.getRebuyCount();
+            if (currentCount >= countMax) {
+                throw new IllegalArgumentException("You have reached the maximum number of rebuys (" + countMax + ")");
+            }
+        }
+
+        GameSession session = sessionManager.get(tableId);
+        boolean handActive = session != null
+                && session.getState().phase() != GamePhase.WAITING
+                && session.getState().phase() != GamePhase.FINISHED;
+
+        if (handActive) {
+            pendingRebuys.computeIfAbsent(tableId, k -> new ConcurrentHashMap<>())
+                    .merge(user.getId().toString(), chips, Integer::sum);
+        } else {
+            seat.setChips(seat.getChips() + chips);
+            seat.setTotalBuyIn(seat.getTotalBuyIn() + chips);
+            seat.setRebuyCount(seat.getRebuyCount() + 1);
+            seatRepository.save(seat);
+        }
+
+        return TableResponse.from(table, seatRepository.findByTableId(tableId), member.getRole());
     }
 
     public void sitOut(Long tableId, String username) {

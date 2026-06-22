@@ -11,5 +11,10 @@ public record CreateTableRequest (
         @Min(2) int bigBlind,
         @Min(2) @Max(9) int maxPlayers,
         @Min(100) int startingChips,
-        @Min(10) @Max(120) int actionTimeoutSecs
+        @Min(10) @Max(120) int actionTimeoutSecs,
+        @Min(0) int rebuyMin,
+        @Min(0) int rebuyMax,
+        @Min(0) int rebuyCountMin,
+        @Min(0) int rebuyCountMax,
+        boolean rebuyUnlimited
 ) {}

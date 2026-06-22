@@ -21,13 +21,18 @@ public record TableResponse(
         String status,
         Instant pausedUntil,
         String myRole,
-        List<SeatInfo> seats
+        List<SeatInfo> seats,
+        int rebuyMin,
+        int rebuyMax,
+        int rebuyCountMin,
+        int rebuyCountMax,
+        boolean rebuyUnlimited
 ) {
-    public record SeatInfo(int seatIndex, String username, int chips, int totalBuyIn) {}
+    public record SeatInfo(int seatIndex, String username, int chips, int totalBuyIn, int rebuyCount) {}
 
     public static TableResponse from(PokerTable table, List<TableSeat> seats, ClubRole myRole) {
         List<SeatInfo> seatInfos = seats.stream()
-                .map(s -> new SeatInfo(s.getSeatIndex(), s.getUser().getUsername(), s.getChips(), s.getTotalBuyIn()))
+                .map(s -> new SeatInfo(s.getSeatIndex(), s.getUser().getUsername(), s.getChips(), s.getTotalBuyIn(), s.getRebuyCount()))
                 .toList();
 
         return new TableResponse(
@@ -44,7 +49,12 @@ public record TableResponse(
                 table.getStatus().name(),
                 table.getPausedUntil(),
                 myRole != null ? myRole.name() : null,
-                seatInfos
+                seatInfos,
+                table.getRebuyMin() > 0 ? table.getRebuyMin() : table.getBigBlind() * 20,
+                table.getRebuyMax() > 0 ? table.getRebuyMax() : table.getBigBlind() * 1000,
+                table.getRebuyCountMin(),
+                table.getRebuyCountMax(),
+                table.isRebuyUnlimited()
         );
     }
 }

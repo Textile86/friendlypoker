@@ -24,6 +24,11 @@ export default function ClubPage() {
     maxPlayers: 6,
     startingChips: 1000,
     actionTimeoutSecs: 30,
+    rebuyMin: 0,
+    rebuyMax: 0,
+    rebuyCountMin: 0,
+    rebuyCountMax: 10,
+    rebuyUnlimited: false,
   })
   const [creating, setCreating] = useState(false)
 
@@ -166,6 +171,80 @@ export default function ClubPage() {
                   </div>
                 ))}
               </div>
+
+              {/* ── Rebuy Settings ── */}
+              <div className="border-t border-gray-700 pt-3 mt-1">
+                <p className="text-xs text-gray-500 uppercase tracking-wide mb-2">Rebuy Settings</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs text-gray-400 mb-1">Min Rebuy (chips)</label>
+                    <input
+                      type="number"
+                      min={0}
+                      className="w-full bg-gray-700 text-white rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      value={form.rebuyMin}
+                      onChange={(e) => setForm({ ...form, rebuyMin: Number(e.target.value) })}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-400 mb-1">Max Rebuy (chips)</label>
+                    <input
+                      type="number"
+                      min={0}
+                      className="w-full bg-gray-700 text-white rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      value={form.rebuyMax}
+                      onChange={(e) => setForm({ ...form, rebuyMax: Number(e.target.value) })}
+                    />
+                  </div>
+                  {!form.rebuyUnlimited && (
+                    <>
+                      <div>
+                        <label className="block text-xs text-gray-400 mb-1">Rebuy Count Min</label>
+                        <input
+                          type="number"
+                          min={0}
+                          className="w-full bg-gray-700 text-white rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          value={form.rebuyCountMin}
+                          onChange={(e) => setForm({ ...form, rebuyCountMin: Number(e.target.value) })}
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-gray-400 mb-1">Rebuy Count Max</label>
+                        <input
+                          type="number"
+                          min={0}
+                          className="w-full bg-gray-700 text-white rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          value={form.rebuyCountMax}
+                          onChange={(e) => setForm({ ...form, rebuyCountMax: Number(e.target.value) })}
+                        />
+                      </div>
+                    </>
+                  )}
+                  <div className="col-span-2 flex items-center gap-3">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="radio"
+                        name="rebuyLimit"
+                        checked={!form.rebuyUnlimited}
+                        onChange={() => setForm({ ...form, rebuyUnlimited: false })}
+                        className="accent-blue-500"
+                      />
+                      <span className="text-xs text-gray-300">Limited</span>
+                    </label>
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="radio"
+                        name="rebuyLimit"
+                        checked={form.rebuyUnlimited}
+                        onChange={() => setForm({ ...form, rebuyUnlimited: true })}
+                        className="accent-blue-500"
+                      />
+                      <span className="text-xs text-gray-300">Unlimited</span>
+                    </label>
+                  </div>
+                </div>
+              </div>
+
               <div className="flex gap-2">
                 <button
                   type="submit"

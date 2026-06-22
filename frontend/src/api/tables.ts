@@ -5,6 +5,7 @@ export interface SeatInfo {
   username: string
   chips: number
   totalBuyIn: number
+  rebuyCount: number
 }
 
 export interface TableResponse {
@@ -22,6 +23,11 @@ export interface TableResponse {
   pausedUntil?: string | null
   myRole?: string
   seats: SeatInfo[]
+  rebuyMin: number
+  rebuyMax: number
+  rebuyCountMin: number
+  rebuyCountMax: number
+  rebuyUnlimited: boolean
 }
 
 export interface CreateTableRequest {
@@ -31,6 +37,11 @@ export interface CreateTableRequest {
   maxPlayers: number
   startingChips: number
   actionTimeoutSecs: number
+  rebuyMin: number
+  rebuyMax: number
+  rebuyCountMin: number
+  rebuyCountMax: number
+  rebuyUnlimited: boolean
 }
 
 export interface PlayerStats {
