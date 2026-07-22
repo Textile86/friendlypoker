@@ -16,7 +16,8 @@ public record GameState(
         List<Card> communityCards,
         int dealerIndex,
         int currentPlayerIndex,
-        GameConfig config
+        GameConfig config,
+        boolean reachedShowdown
         ) {
     public GameState {
         communityCards = List.copyOf(communityCards);
@@ -60,37 +61,42 @@ public record GameState(
 
     public GameState withHandNumber(long handNumber) {
         return new GameState(tableId, handNumber, phase, players, deck, pot,
-                communityCards, dealerIndex, currentPlayerIndex, config);
+                communityCards, dealerIndex, currentPlayerIndex, config, reachedShowdown);
     }
 
     public GameState withPhase(GamePhase phase) {
         return new GameState(tableId, handNumber, phase, players, deck, pot,
-                communityCards, dealerIndex, currentPlayerIndex, config);
+                communityCards, dealerIndex, currentPlayerIndex, config, reachedShowdown);
     }
 
     public GameState withPlayers(List<PlayerState> players) {
         return new GameState(tableId, handNumber, phase, players, deck, pot,
-                communityCards, dealerIndex, currentPlayerIndex, config);
+                communityCards, dealerIndex, currentPlayerIndex, config, reachedShowdown);
     }
 
     public GameState withPot(Pot pot) {
         return new GameState(tableId, handNumber, phase, players, deck, pot,
-                communityCards, dealerIndex, currentPlayerIndex, config);
+                communityCards, dealerIndex, currentPlayerIndex, config, reachedShowdown);
     }
 
     public GameState withCommunityCards(List<Card> communityCards) {
         return new GameState(tableId, handNumber, phase, players, deck, pot,
-                communityCards, dealerIndex, currentPlayerIndex, config);
+                communityCards, dealerIndex, currentPlayerIndex, config, reachedShowdown);
     }
 
     public GameState withCurrentPlayerIndex(int currentPlayerIndex) {
         return new GameState(tableId, handNumber, phase, players, deck, pot,
-                communityCards, dealerIndex, currentPlayerIndex, config);
+                communityCards, dealerIndex, currentPlayerIndex, config, reachedShowdown);
     }
 
     public GameState withDealerIndex(int dealerIndex) {
         return new GameState(tableId, handNumber, phase, players, deck, pot,
-                communityCards, dealerIndex, currentPlayerIndex, config);
+                communityCards, dealerIndex, currentPlayerIndex, config, reachedShowdown);
+    }
+
+    public GameState withReachedShowdown(boolean reachedShowdown) {
+        return new GameState(tableId, handNumber, phase, players, deck, pot,
+                communityCards, dealerIndex, currentPlayerIndex, config, reachedShowdown);
     }
 
     public GameState replacePlayer(PlayerState updated) {
