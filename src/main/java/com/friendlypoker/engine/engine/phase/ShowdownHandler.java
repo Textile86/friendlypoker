@@ -26,6 +26,7 @@ public class ShowdownHandler implements PhaseHandler {
 
     @Override
     public GameResult handle(GameState state, GameAction action) {
+        state = state.withReachedShowdown(true);
         List<GameEvent> events = new ArrayList<>();
         List<PlayerState> activePlayers = state.activePlayers();
         Map<String, HandEvaluation> evaluations = new LinkedHashMap<>();

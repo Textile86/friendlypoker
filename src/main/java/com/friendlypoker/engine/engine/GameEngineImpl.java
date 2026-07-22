@@ -29,7 +29,8 @@ public class GameEngineImpl implements GameEngine {
                 List.of(),
                 0,
                 0,
-                config
+                config,
+                false
         );
     }
 
@@ -108,7 +109,7 @@ public class GameEngineImpl implements GameEngine {
         GameState next = new GameState(
                 state.tableId(), handNumber, GamePhase.PRE_FLOP,
                 resetPlayers, deck, Pot.empty(), List.of(),
-                dealerIdx, 0, state.config()
+                dealerIdx, 0, state.config(), false
         );
 
         List<String> playerIds = next.players().stream().map(PlayerState::id).toList();

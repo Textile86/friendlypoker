@@ -46,7 +46,8 @@ public record GameStateView(
     ) {}
 
     public static GameStateView from(Long tableId, GameState state, String viewerPlayerId) {
-        boolean showdown = state.phase() == GamePhase.FINISHED || state.phase() == GamePhase.SHOWDOWN;
+        boolean showdown = state.phase() == GamePhase.SHOWDOWN
+                || (state.phase() == GamePhase.FINISHED && state.reachedShowdown());
 
         List<PlayerView> players = state.players().stream().map(p -> {
                     boolean isViewer = viewerPlayerId != null && p.id().equals(viewerPlayerId);

@@ -127,10 +127,10 @@ export function useGameSocket(
           if (ev.type === 'Showdown') {
             const community = communityCardsRef?.current ?? []
             const lines = formatShowdownLines(ev, resolve, community)
-            setEvents((prev) => [...prev, ...lines].slice(-80))
+            setEvents((prev) => [...lines, ...prev].slice(0, 80))
           } else {
             const text = formatEvent(ev, resolve)
-            setEvents((prev) => [...prev, text].slice(-80))
+            setEvents((prev) => [text, ...prev].slice(0, 80))
           }
         })
       },
