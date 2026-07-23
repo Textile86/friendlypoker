@@ -81,7 +81,9 @@ public class GameEngineImpl implements GameEngine {
 
     @Override
     public GameResult startHand(GameState state) {
-        long activeCount = state.players().stream().filter(p -> p.chips() > 0).count();
+        long activeCount = state.players().stream()
+                .filter(p -> p.chips() > 0 && p.status() != PlayerStatus.SITTING_OUT)
+                .count();
         if (activeCount < state.config().minPlayers()) {
             throw new IllegalStateException("Not enough players with chips to start hand");
         }
@@ -96,9 +98,16 @@ public class GameEngineImpl implements GameEngine {
 
         List<PlayerState> resetPlayers = state.players().stream()
                 .map(p -> {
-                    if (p.chips() <= 0) return p.withStatus(PlayerStatus.SITTING_OUT);
-                    // SITTING_OUT players with chips get cards and become ACTIVE
-                    // (prevents permanent lock-out from timeout sitOut)
+                    if (p.chips() <= 0) return p.withStatus(PlayerStatus.SITTING_OUT)
+                            .withHoleCards(List.of())
+                            .resetRoundBet()
+                            .withTotalBet(0);
+                    // SITTING_OUT players stay out — no cards, no blinds, dealer skips them
+                    if (p.status() == PlayerStatus.SITTING_OUT) {
+                        return p.withHoleCards(List.of())
+                                .resetRoundBet()
+                                .withTotalBet(0);
+                    }
                     return p.withStatus(PlayerStatus.ACTIVE)
                             .withHoleCards(List.of())
                             .resetRoundBet()
@@ -173,7 +182,8 @@ public class GameEngineImpl implements GameEngine {
         int current = state.dealerIndex();
         for (int i = 1; i <= size; i++) {
             int candidate = (current + i) % size;
-            if (state.players().get(candidate).chips() > 0) {
+            PlayerState p = state.players().get(candidate);
+            if (p.chips() > 0 && p.status() != PlayerStatus.SITTING_OUT) {
                 return candidate;
             }
         }

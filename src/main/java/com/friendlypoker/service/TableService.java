@@ -52,6 +52,7 @@ public class TableService {
         table.setRebuyCountMin(req.rebuyCountMin());
         table.setRebuyCountMax(req.rebuyCountMax());
         table.setRebuyUnlimited(req.rebuyUnlimited());
+        table.setSitOutTimeoutMinutes(req.sitOutTimeoutMinutes());
         table.setCreatedBy(user);
         tableRepository.save(table);
 

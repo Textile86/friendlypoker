@@ -628,20 +628,114 @@ public class GameService {
         return TableResponse.from(table, seatRepository.findByTableId(tableId), member.getRole());
     }
 
+    @Transactional
     public void sitOut(Long tableId, String username) {
-        GameSession session = sessionManager.get(tableId);
-        if (session == null) return;
         User user = userRepository.findByUsername(username)
                 .orElseThrow(() -> new IllegalStateException("User not found"));
-        session.sitOut(user.getId().toString());
+
+        TableSeat seat = seatRepository.findByTableIdAndUserId(tableId, user.getId())
+                .orElseThrow(() -> new IllegalArgumentException("You are not seated at this table"));
+
+        PokerTable table = tableRepository.findById(tableId)
+                .orElseThrow(() -> new IllegalArgumentException("Table not found"));
+
+        // Set sit-out timer
+        int timeoutMinutes = table.getSitOutTimeoutMinutes();
+        seat.setSitOutUntil(Instant.now().plus(Duration.ofMinutes(timeoutMinutes)));
+        seatRepository.save(seat);
+
+        // Mark in session
+        GameSession session = sessionManager.get(tableId);
+        if (session == null) return;
+        String playerId = user.getId().toString();
+        session.sitOut(playerId);
+
+        // If hand is not active, apply immediately to game state
+        if (session.getState().phase() == GamePhase.WAITING
+                || session.getState().phase() == GamePhase.FINISHED) {
+            session.getState().findPlayer(playerId).ifPresent(p ->
+                session.setState(session.getState().replacePlayer(
+                        p.withStatus(PlayerStatus.SITTING_OUT)
+                ))
+            );
+        }
+
+        messaging.convertAndSend(
+                "/topic/tables/" + tableId + "/events",
+                new GameEventView("PlayerSitOut", Map.of("playerId", playerId))
+        );
     }
 
+    @Transactional
     public void imBack(Long tableId, String username) {
-        GameSession session = sessionManager.get(tableId);
-        if (session == null) return;
         User user = userRepository.findByUsername(username)
                 .orElseThrow(() -> new IllegalStateException("User not found"));
-        session.imBack(user.getId().toString());
+
+        TableSeat seat = seatRepository.findByTableIdAndUserId(tableId, user.getId())
+                .orElseThrow(() -> new IllegalArgumentException("You are not seated at this table"));
+
+        // Clear sit-out timer
+        seat.setSitOutUntil(null);
+        seatRepository.save(seat);
+
+        // Re-activate in session
+        GameSession session = sessionManager.get(tableId);
+        if (session == null) return;
+        String playerId = user.getId().toString();
+        session.imBack(playerId);
+
+        // If hand is not active, activate immediately
+        if (session.getState().phase() == GamePhase.WAITING
+                || session.getState().phase() == GamePhase.FINISHED) {
+            session.getState().findPlayer(playerId).ifPresent(p ->
+                session.setState(session.getState().replacePlayer(
+                        p.withStatus(PlayerStatus.ACTIVE)
+                ))
+            );
+        }
+
+        messaging.convertAndSend(
+                "/topic/tables/" + tableId + "/events",
+                new GameEventView("PlayerImBack", Map.of("playerId", playerId))
+        );
+    }
+
+    @Transactional
+    public void setWaitForBb(Long tableId, String username, boolean waitForBb) {
+        User user = userRepository.findByUsername(username)
+                .orElseThrow(() -> new IllegalStateException("User not found"));
+
+        TableSeat seat = seatRepository.findByTableIdAndUserId(tableId, user.getId())
+                .orElseThrow(() -> new IllegalArgumentException("You are not seated at this table"));
+
+        seat.setWaitForBb(waitForBb);
+        seatRepository.save(seat);
+    }
+
+    /**
+     * Checks seated players with expired sit-out timers and auto-removes them from the table.
+     * Called periodically or on hand start.
+     */
+    @Transactional
+    public void evictExpiredSitOuts(Long tableId) {
+        List<TableSeat> seats = seatRepository.findByTableId(tableId);
+        Instant now = Instant.now();
+        for (TableSeat seat : seats) {
+            if (seat.getSitOutUntil() != null && seat.getSitOutUntil().isBefore(now)) {
+                // Sit-out timer expired — auto-leave table
+                GameSession session = sessionManager.get(tableId);
+                if (session != null) {
+                    String playerId = seat.getUser().getId().toString();
+                    GameResult result = session.leavePlayer(playerId);
+                    boolean finished = result.newState().phase() == GamePhase.FINISHED;
+                    broadcast(tableId, result);
+                    if (finished) {
+                        finishGame(tableId, result);
+                    }
+                }
+                seatRepository.delete(seat);
+            }
+        }
     }
 
     public void showCards(Long tableId, String username) {

@@ -40,4 +40,10 @@ public class TableSeat {
 
     @Column(nullable = false)
     private int rebuyCount = 0;
+
+    @Column
+    private Instant sitOutUntil;
+
+    @Column(nullable = false)
+    private boolean waitForBb = false;
 }

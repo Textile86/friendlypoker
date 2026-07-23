@@ -7,7 +7,7 @@ import {
   CardView, PlayerView, GameStateView, AvailableActions,
   getGameState, getAvailableActions, startHand, submitAction,
 } from '../api/game'
-import { getTable, sitDown, standUp, rebuy, getTableStatistics, closeTable, pauseTable, sitOut as sitOutAPI, imBack as imBackAPI, showCards as showCardsAPI, TableResponse, PlayerStats } from '../api/tables'
+import { getTable, sitDown, standUp, rebuy, getTableStatistics, closeTable, pauseTable, sitOut as sitOutAPI, imBack as imBackAPI, showCards as showCardsAPI, setWaitForBb, TableResponse, PlayerStats } from '../api/tables'
 
 // ─── Card helpers ────────────────────────────────────────────────────────────
 
@@ -678,7 +678,8 @@ export default function GamePage() {
   const dealerIdx = gameState?.dealerIndex ?? -1
   const currentIdx = gameState?.currentPlayerIndex ?? -1
 
-  const mySeatIdx = (table?.seats ?? []).find((s) => s.username === username)?.seatIndex
+  const mySeatInfo = (table?.seats ?? []).find((s) => s.username === username)
+  const mySeatIdx = mySeatInfo?.seatIndex
   const myPlayer = hasGameState
     ? players.find((p) => p.seatIndex === mySeatIdx) ?? undefined
     : undefined
@@ -871,6 +872,16 @@ export default function GamePage() {
               {isSeated && (
                 <button onClick={() => { setRebuyAmount(table?.rebuyMin || minBuyIn); setRebuyModal(true) }} className="bg-emerald-700 hover:bg-emerald-600 px-3 py-1 rounded-lg text-xs font-semibold transition">
                   Rebuy
+                </button>
+              )}
+              {isSeated && !mySeatInfo?.sitOutUntil && (
+                <button onClick={async () => { await sitOutAPI(tableId); getTable(tableId).then(setTable).catch(() => {}) }} className="bg-amber-700 hover:bg-amber-600 px-3 py-1 rounded-lg text-xs font-semibold transition">
+                  Sit Out
+                </button>
+              )}
+              {isSeated && mySeatInfo?.sitOutUntil && (
+                <button onClick={async () => { await imBackAPI(tableId); setSittingOut(false); consecutiveTimeoutsRef.current = 0; getTable(tableId).then(setTable).catch(() => {}) }} className="bg-green-600 hover:bg-green-500 px-3 py-1 rounded-lg text-xs font-semibold transition animate-pulse">
+                  I'm Back
                 </button>
               )}
               {isSeated && (

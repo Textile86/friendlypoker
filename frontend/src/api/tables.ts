@@ -6,6 +6,8 @@ export interface SeatInfo {
   chips: number
   totalBuyIn: number
   rebuyCount: number
+  sitOutUntil?: string | null
+  waitForBb: boolean
 }
 
 export interface TableResponse {
@@ -28,6 +30,7 @@ export interface TableResponse {
   rebuyCountMin: number
   rebuyCountMax: number
   rebuyUnlimited: boolean
+  sitOutTimeoutMinutes: number
 }
 
 export interface CreateTableRequest {
@@ -42,6 +45,7 @@ export interface CreateTableRequest {
   rebuyCountMin: number
   rebuyCountMax: number
   rebuyUnlimited: boolean
+  sitOutTimeoutMinutes: number
 }
 
 export interface PlayerStats {
@@ -86,3 +90,6 @@ export const imBack = (tableId: number) =>
 
 export const showCards = (tableId: number) =>
   api.post(`/tables/${tableId}/show-cards`)
+
+export const setWaitForBb = (tableId: number, wait: boolean) =>
+  api.post(`/tables/${tableId}/wait-for-bb?wait=${wait}`)
