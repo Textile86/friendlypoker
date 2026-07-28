@@ -64,4 +64,8 @@ public class PokerTable {
 
     @Column(nullable = false)
     private boolean rebuyUnlimited = false;
+
+    // ── Sit-out settings ──
+    @Column(nullable = false)
+    private int sitOutTimeoutMinutes = 8;
 }

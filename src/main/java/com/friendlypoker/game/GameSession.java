@@ -7,6 +7,7 @@ import com.friendlypoker.engine.domain.model.GameState;
 import com.friendlypoker.engine.domain.model.PlayerState;
 import com.friendlypoker.engine.domain.model.enums.PlayerStatus;
 import com.friendlypoker.engine.engine.GameEngine;
+import com.friendlypoker.engine.engine.PlayerTurnManager;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -18,6 +19,8 @@ public class GameSession {
     private GameState state;
     // Players who opted to sit-out (will be skipped next hand)
     private final Set<String> sittingOutIds = ConcurrentHashMap.newKeySet();
+    // Subset of sittingOutIds: returned via "I'm Back" but deferred until their own big blind seat comes up
+    private final Set<String> waitingForBbIds = ConcurrentHashMap.newKeySet();
 
     public GameSession(GameEngine engine, GameState initialState) {
         this.engine = engine;
@@ -34,6 +37,37 @@ public class GameSession {
                     .toList();
             state = state.withPlayers(adjusted);
         }
+
+        // Resolve deferred "wait for BB" returns: promote a player only once the
+        // upcoming hand's big-blind position (computed excluding all sitting-out players)
+        // actually lands on them. bigBlindIndex() returns a position within state.players(),
+        // NOT PlayerState.seatIndex() (that's the physical table seat number) - compare like with like.
+        if (!waitingForBbIds.isEmpty()) {
+            List<PlayerState> players = state.players();
+            int dealerIdx = PlayerTurnManager.nextDealerIndex(state);
+            int bbIdx = PlayerTurnManager.bigBlindIndex(state.withDealerIndex(dealerIdx));
+            long activeCount = players.stream()
+                    .filter(p -> p.chips() > 0 && p.status() != PlayerStatus.SITTING_OUT)
+                    .count();
+            for (String playerId : new ArrayList<>(waitingForBbIds)) {
+                int idx = -1;
+                for (int i = 0; i < players.size(); i++) {
+                    if (players.get(i).id().equals(playerId)) { idx = i; break; }
+                }
+                if (idx < 0) continue;
+                // With fewer than 2 genuinely active players, blinds/dealer can never rotate onto
+                // a waiting player (the seat math degenerates) - promote now instead of deadlocking forever.
+                boolean isOwnBbTurn = idx == bbIdx;
+                boolean tableWouldBeStuck = activeCount < 2;
+                if (isOwnBbTurn || tableWouldBeStuck) {
+                    sittingOutIds.remove(playerId);
+                    waitingForBbIds.remove(playerId);
+                    state = state.replacePlayer(players.get(idx).withStatus(PlayerStatus.ACTIVE));
+                    activeCount++;
+                }
+            }
+        }
+
         GameResult result = engine.startHand(state);
         state = result.newState();
         return result;
@@ -52,6 +86,7 @@ public class GameSession {
         }
 
         sittingOutIds.remove(playerId);
+        waitingForBbIds.remove(playerId);
 
         if (state.phase().isBettingPhase() && player.status().isInHand()) {
             List<GameEvent> events = new ArrayList<>();
@@ -83,10 +118,27 @@ public class GameSession {
 
     public synchronized void sitOut(String playerId) {
         sittingOutIds.add(playerId);
+        waitingForBbIds.remove(playerId);
     }
 
-    public synchronized void imBack(String playerId) {
-        sittingOutIds.remove(playerId);
+    public synchronized void imBack(String playerId, boolean waitForBb) {
+        if (waitForBb) {
+            waitingForBbIds.add(playerId);
+        } else {
+            sittingOutIds.remove(playerId);
+            waitingForBbIds.remove(playerId);
+        }
+    }
+
+    public synchronized void setWaitForBb(String playerId, boolean waitForBb) {
+        if (waitForBb) {
+            if (sittingOutIds.contains(playerId)) {
+                waitingForBbIds.add(playerId);
+            }
+        } else {
+            sittingOutIds.remove(playerId);
+            waitingForBbIds.remove(playerId);
+        }
     }
 
     public synchronized GameState getState() {

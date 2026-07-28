@@ -74,4 +74,21 @@ public final class PlayerTurnManager {
         }
         return from;
     }
+
+    public static int nextDealerIndex(GameState state) {
+        int size = state.players().size();
+        if (state.handNumber() == 0) {
+            return 0;
+        }
+
+        int current = state.dealerIndex();
+        for (int i = 1; i <= size; i++) {
+            int candidate = (current + i) % size;
+            PlayerState p = state.players().get(candidate);
+            if (p.chips() > 0 && p.status() != PlayerStatus.SITTING_OUT) {
+                return candidate;
+            }
+        }
+        return current;
+    }
 }

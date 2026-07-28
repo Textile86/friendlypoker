@@ -88,4 +88,13 @@ public class GameController {
         gameService.showCards(id, user.getUsername());
         return ResponseEntity.noContent().build();
     }
+
+    @PostMapping("/api/tables/{id}/wait-for-bb")
+    public ResponseEntity<Void> setWaitForBb(
+            @PathVariable Long id,
+            @RequestParam boolean wait,
+            @AuthenticationPrincipal UserDetails user) {
+        gameService.setWaitForBb(id, user.getUsername(), wait);
+        return ResponseEntity.noContent().build();
+    }
 }

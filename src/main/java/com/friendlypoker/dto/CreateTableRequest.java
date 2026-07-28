@@ -16,5 +16,6 @@ public record CreateTableRequest (
         @Min(0) int rebuyMax,
         @Min(0) int rebuyCountMin,
         @Min(0) int rebuyCountMax,
-        boolean rebuyUnlimited
+        boolean rebuyUnlimited,
+        @Min(5) @Max(60) int sitOutTimeoutMinutes
 ) {}

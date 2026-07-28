@@ -94,3 +94,6 @@ logs/
 *.bak
 *.zip
 *.tar.gz
+
+# Reference repos (not part of this project)
+poker-reference-repos/

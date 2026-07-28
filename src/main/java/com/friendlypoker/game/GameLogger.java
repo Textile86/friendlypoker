@@ -94,6 +94,27 @@ public class GameLogger {
         });
     }
 
+    public static void logSitOut(Long tableId, String playerId) {
+        WRITER.submit(() -> {
+            log.info("[TABLE {}] SIT-OUT player={}", tableId, playerId);
+            writeFile(tableId, ts() + "SIT-OUT player=" + playerId + '\n');
+        });
+    }
+
+    public static void logImBack(Long tableId, String playerId, boolean waitForBb) {
+        WRITER.submit(() -> {
+            log.info("[TABLE {}] IM-BACK player={} waitForBb={}", tableId, playerId, waitForBb);
+            writeFile(tableId, ts() + "IM-BACK player=" + playerId + " waitForBb=" + waitForBb + '\n');
+        });
+    }
+
+    public static void logSitOutEvicted(Long tableId, String playerId) {
+        WRITER.submit(() -> {
+            log.info("[TABLE {}] SIT-OUT-EVICTED player={}", tableId, playerId);
+            writeFile(tableId, ts() + "SIT-OUT-EVICTED player=" + playerId + " (timer expired, auto-left table)\n");
+        });
+    }
+
     public static void logAutoResolve(Long tableId, GameState before, GameResult result) {
         String from = before.phase().name();
         String to = result.newState().phase().name();
