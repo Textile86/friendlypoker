@@ -94,7 +94,7 @@ public class GameEngineImpl implements GameEngine {
 
         Deck deck = Deck.shuffled();
         Long handNumber = state.handNumber() + 1;
-        int dealerIdx = nextDealerIndex(state);
+        int dealerIdx = PlayerTurnManager.nextDealerIndex(state);
 
         List<PlayerState> resetPlayers = state.players().stream()
                 .map(p -> {
@@ -172,24 +172,6 @@ public class GameEngineImpl implements GameEngine {
                 .orElseThrow(() -> new IllegalStateException(
                         "No handler registered for phase: " + phase));
     }
-
-    private int nextDealerIndex(GameState state) {
-        int size = state.players().size();
-        if (state.handNumber() == 0) {
-            return 0;
-        }
-
-        int current = state.dealerIndex();
-        for (int i = 1; i <= size; i++) {
-            int candidate = (current + i) % size;
-            PlayerState p = state.players().get(candidate);
-            if (p.chips() > 0 && p.status() != PlayerStatus.SITTING_OUT) {
-                return candidate;
-            }
-        }
-        return current;
-    }
-
 
     private GameState postBlinds(GameState state, List<GameEvent> events) {
         int sbIdx = PlayerTurnManager.smallBlindIndex(state);

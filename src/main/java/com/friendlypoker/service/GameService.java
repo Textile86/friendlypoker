@@ -660,6 +660,7 @@ public class GameService {
             );
         }
 
+        GameLogger.logSitOut(tableId, playerId);
         messaging.convertAndSend(
                 "/topic/tables/" + tableId + "/events",
                 new GameEventView("PlayerSitOut", Map.of("playerId", playerId))
@@ -674,26 +675,17 @@ public class GameService {
         TableSeat seat = seatRepository.findByTableIdAndUserId(tableId, user.getId())
                 .orElseThrow(() -> new IllegalArgumentException("You are not seated at this table"));
 
-        // Clear sit-out timer
+        // Clear sit-out timer; default to waiting for own big blind (like GG Poker)
         seat.setSitOutUntil(null);
+        seat.setWaitForBb(true);
         seatRepository.save(seat);
 
-        // Re-activate in session
         GameSession session = sessionManager.get(tableId);
         if (session == null) return;
         String playerId = user.getId().toString();
-        session.imBack(playerId);
+        session.imBack(playerId, true);
 
-        // If hand is not active, activate immediately
-        if (session.getState().phase() == GamePhase.WAITING
-                || session.getState().phase() == GamePhase.FINISHED) {
-            session.getState().findPlayer(playerId).ifPresent(p ->
-                session.setState(session.getState().replacePlayer(
-                        p.withStatus(PlayerStatus.ACTIVE)
-                ))
-            );
-        }
-
+        GameLogger.logImBack(tableId, playerId, true);
         messaging.convertAndSend(
                 "/topic/tables/" + tableId + "/events",
                 new GameEventView("PlayerImBack", Map.of("playerId", playerId))
@@ -710,6 +702,27 @@ public class GameService {
 
         seat.setWaitForBb(waitForBb);
         seatRepository.save(seat);
+
+        GameSession session = sessionManager.get(tableId);
+        if (session == null) return;
+        String playerId = user.getId().toString();
+        session.setWaitForBb(playerId, waitForBb);
+
+        if (!waitForBb) {
+            // Posting the blind now instead of waiting — activate immediately if no hand is running
+            if (session.getState().phase() == GamePhase.WAITING
+                    || session.getState().phase() == GamePhase.FINISHED) {
+                session.getState().findPlayer(playerId).ifPresent(p ->
+                    session.setState(session.getState().replacePlayer(
+                            p.withStatus(PlayerStatus.ACTIVE)
+                    ))
+                );
+            }
+            messaging.convertAndSend(
+                    "/topic/tables/" + tableId + "/events",
+                    new GameEventView("PlayerImBack", Map.of("playerId", playerId))
+            );
+        }
     }
 
     /**
@@ -733,6 +746,7 @@ public class GameService {
                         finishGame(tableId, result);
                     }
                 }
+                GameLogger.logSitOutEvicted(tableId, seat.getUser().getId().toString());
                 seatRepository.delete(seat);
             }
         }

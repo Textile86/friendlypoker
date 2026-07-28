@@ -221,12 +221,14 @@ interface PlayerSeatProps {
   maxPlayers: number
   receivingPot: boolean
   phase: string
+  sittingOutRequested: boolean
 }
 
-function PlayerSeat({ player, isMe, isDealer, isActive, maxPlayers, receivingPot, phase }: PlayerSeatProps) {
+function PlayerSeat({ player, isMe, isDealer, isActive, maxPlayers, receivingPot, phase, sittingOutRequested }: PlayerSeatProps) {
   const pos = getSeatPos(player.seatIndex, maxPlayers)
+  const isAway = player.status === 'SITTING_OUT' || sittingOutRequested
   // In FINISHED phase show everyone at full opacity (showdown reveal)
-  const folded = (player.status === 'FOLDED' || player.status === 'SITTING_OUT') && phase !== 'FINISHED'
+  const folded = (player.status === 'FOLDED' || isAway) && phase !== 'FINISHED'
   // Show hole cards if server sent them; in FINISHED only show cards for players with chips (or if server revealed)
   const showCards = player.holeCards.length > 0 && (phase !== 'FINISHED' || player.chips > 0 || player.holeCards.length > 0)
   const showCardBacks = !showCards && phase !== 'FINISHED' && ((player.status === 'ACTIVE' || player.status === 'ALL_IN') || isMe)
@@ -246,13 +248,20 @@ function PlayerSeat({ player, isMe, isDealer, isActive, maxPlayers, receivingPot
               : null}
         </div>
 
+        {/* Sit-out indicator */}
+        {isAway && (
+          <div className="text-amber-400 text-[10px] font-bold mb-0.5">⏸ Away</div>
+        )}
+
         {/* Info box */}
         <div className={`relative px-2 py-1 rounded-lg text-center text-xs shadow-lg border min-w-[76px] ${
           isActive
             ? 'bg-yellow-600 border-yellow-400 text-white animate-pulse'
-            : isMe
-              ? 'bg-blue-700 border-blue-400 text-white'
-              : 'bg-gray-800 border-gray-600 text-gray-200'
+            : isAway
+              ? 'bg-amber-900 border-amber-600 text-amber-200'
+              : isMe
+                ? 'bg-blue-700 border-blue-400 text-white'
+                : 'bg-gray-800 border-gray-600 text-gray-200'
         } ${receivingPot ? 'ring-2 ring-yellow-400 ring-offset-1 ring-offset-black' : ''}`}>
           <div className="font-semibold truncate max-w-[76px]">{player.displayName}</div>
           <div className="opacity-80">{player.chips} chips</div>
@@ -293,6 +302,8 @@ export default function GamePage() {
   const animCardsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [sittingOut, setSittingOut] = useState(false)
   const consecutiveTimeoutsRef = useRef(0)
+  const [sitOutSecondsLeft, setSitOutSecondsLeft] = useState(0)
+  const sitOutTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const [showCardsLeft, setShowCardsLeft] = useState(0)
   const showCardsTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const [closedByOwner, setClosedByOwner] = useState(false)
@@ -440,8 +451,9 @@ export default function GamePage() {
     },
     (ev) => {
       if (ev.type === 'TableClosed') setClosedByOwner(true)
-      if (ev.type === 'SeatsChanged') getTable(tableId).then(setTable).catch(() => {})
-      if (ev.type === 'PlayerLeft') getTable(tableId).then(setTable).catch(() => {})
+      if (ev.type === 'SeatsChanged' || ev.type === 'PlayerSitOut' || ev.type === 'PlayerImBack' || ev.type === 'PlayerLeft') {
+        getTable(tableId).then(setTable).catch(() => {})
+      }
       if (ev.type === 'HandStarted') {
         const handNumber = Number(ev.data?.handNumber ?? -1)
         if (handNumber !== -1 && handNumber === lastHandStartedRef.current) return
@@ -507,10 +519,12 @@ export default function GamePage() {
   )
 
   // Fetch my hole cards ONCE per hand — personalized REST call
+  // Skip when sitting out — no cards will arrive, avoid HTTP storm
   useEffect(() => {
     if (!gameState || !BETTING_PHASES.has(gameState.phase)) return
     if (myCardsRef.current?.hand === gameState.handNumber) return
     if (fetchedHandRef.current === gameState.handNumber) return
+    if (myPlayer?.status === 'SITTING_OUT') return
 
     clearViewerCardsRetry()
     syncViewerCards(gameState.handNumber)
@@ -684,6 +698,8 @@ export default function GamePage() {
     ? players.find((p) => p.seatIndex === mySeatIdx) ?? undefined
     : undefined
   const isSeated = (table?.seats ?? []).some((s) => s.username === username)
+  // Returned via "I'm Back" but deferred until it's actually this player's big blind turn.
+  const waitingForBb = myPlayer?.status === 'SITTING_OUT' && !mySeatInfo?.sitOutUntil
 
   const isStaff = table?.myRole === 'OWNER' || table?.myRole === 'ADMIN'
   const canSitDown =
@@ -753,7 +769,7 @@ export default function GamePage() {
             consecutiveTimeoutsRef.current += 1
             if (consecutiveTimeoutsRef.current >= 2) {
               setSittingOut(true)
-              sitOutAPI(tableId).catch(() => {})
+              sitOutAPI(tableId).then(() => getTable(tableId).then(setTable)).catch(() => {})
             }
             handleAction('FOLD', 0, true)
           }
@@ -785,15 +801,29 @@ export default function GamePage() {
     return () => { if (showCardsTimerRef.current) { clearInterval(showCardsTimerRef.current); showCardsTimerRef.current = null } }
   }, [phase]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Auto-start next hand after FINISHED (5-second delay so winner banner is visible).
-  // Count from table.seats (DB) — session players may not include late joiners.
+  // Auto-start next hand after FINISHED (5-second delay), retrying every 5s
+  // until it succeeds — a single failed attempt (e.g. a sit-out player not yet
+  // promoted server-side) must not require a manual page refresh to recover.
   useEffect(() => {
     if (phase !== 'FINISHED' || !isSeated) return
-    const playersWithChips = (table?.seats ?? []).filter(s => s.chips > 0).length
-    if (playersWithChips < 2) return
-    const timer = setTimeout(() => handleStartHand(true), 5000)
-    return () => clearTimeout(timer)
+    const activePlayers = (table?.seats ?? []).filter(s => s.chips > 0 && !s.sitOutUntil).length
+    if (activePlayers < 2) return
+    const timer = setInterval(() => handleStartHand(true), 5000)
+    return () => clearInterval(timer)
   }, [phase, table?.seats]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Sit-out auto-leave countdown, shown on screen while sitOutUntil is set.
+  useEffect(() => {
+    if (sitOutTimerRef.current) { clearInterval(sitOutTimerRef.current); sitOutTimerRef.current = null }
+    const until = mySeatInfo?.sitOutUntil ? new Date(mySeatInfo.sitOutUntil).getTime() : 0
+    if (!until) { setSitOutSecondsLeft(0); return }
+    const update = () => setSitOutSecondsLeft(Math.max(0, Math.ceil((until - Date.now()) / 1000)))
+    update()
+    sitOutTimerRef.current = setInterval(update, 1000)
+    return () => {
+      if (sitOutTimerRef.current) { clearInterval(sitOutTimerRef.current); sitOutTimerRef.current = null }
+    }
+  }, [mySeatInfo?.sitOutUntil])
 
   // ── Events sidebar scroll preservation ────────────────────────────────
   // When new events are prepended, keep the user's scroll position stable.
@@ -874,15 +904,30 @@ export default function GamePage() {
                   Rebuy
                 </button>
               )}
-              {isSeated && !mySeatInfo?.sitOutUntil && (
-                <button onClick={async () => { await sitOutAPI(tableId); getTable(tableId).then(setTable).catch(() => {}) }} className="bg-amber-700 hover:bg-amber-600 px-3 py-1 rounded-lg text-xs font-semibold transition">
+              {isSeated && !mySeatInfo?.sitOutUntil && !waitingForBb && (
+                <label className="flex items-center gap-1.5 bg-amber-700/40 hover:bg-amber-700/60 px-3 py-1 rounded-lg text-xs font-semibold transition cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={false}
+                    onChange={async () => { await sitOutAPI(tableId); getTable(tableId).then(setTable).catch(() => {}) }}
+                  />
                   Sit Out
-                </button>
+                </label>
               )}
               {isSeated && mySeatInfo?.sitOutUntil && (
                 <button onClick={async () => { await imBackAPI(tableId); setSittingOut(false); consecutiveTimeoutsRef.current = 0; getTable(tableId).then(setTable).catch(() => {}) }} className="bg-green-600 hover:bg-green-500 px-3 py-1 rounded-lg text-xs font-semibold transition animate-pulse">
                   I'm Back
                 </button>
+              )}
+              {isSeated && waitingForBb && (
+                <label className="flex items-center gap-1.5 bg-blue-900/50 border border-blue-700 px-3 py-1 rounded-lg text-xs cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={mySeatInfo?.waitForBb ?? true}
+                    onChange={async (e) => { await setWaitForBb(tableId, e.target.checked); getTable(tableId).then(setTable).catch(() => {}) }}
+                  />
+                  Ожидание блайндов
+                </label>
               )}
               {isSeated && (
                 <button onClick={handleLeave} className="bg-gray-700 hover:bg-gray-600 px-3 py-1 rounded-lg text-xs font-semibold transition">
@@ -1042,6 +1087,7 @@ export default function GamePage() {
                       maxPlayers={maxPlayers}
                       receivingPot={potToWinner === player.seatIndex}
                       phase={phase}
+                      sittingOutRequested={!!(table?.seats ?? []).find((s) => s.seatIndex === player.seatIndex)?.sitOutUntil}
                     />
                   ))}
 
@@ -1161,6 +1207,14 @@ export default function GamePage() {
                     </button>
                   ))}
                 </div>
+              </div>
+            )}
+
+            {sitOutSecondsLeft > 0 && (
+              <div className="flex justify-center">
+                <span className="bg-amber-900/60 border border-amber-700 rounded-lg px-4 py-2 text-sm text-amber-200">
+                  ⏸ Away · Auto-leave in {formatDuration(sitOutSecondsLeft)}
+                </span>
               </div>
             )}
 

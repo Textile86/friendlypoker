@@ -29,6 +29,7 @@ export default function ClubPage() {
     rebuyCountMin: 0,
     rebuyCountMax: 10,
     rebuyUnlimited: false,
+    sitOutTimeoutMinutes: 8,
   })
   const [creating, setCreating] = useState(false)
 
@@ -170,6 +171,33 @@ export default function ClubPage() {
                     />
                   </div>
                 ))}
+              </div>
+
+              {/* ── Sit-out Settings ── */}
+              <div className="border-t border-gray-700 pt-3 mt-1">
+                <p className="text-xs text-gray-500 uppercase tracking-wide mb-2">Sit-out Settings</p>
+                <div className="grid grid-cols-1 gap-3">
+                  <div>
+                    <label className="block text-xs text-gray-400 mb-1">Sit-out Timeout (5–60 min)</label>
+                    <input
+                      type="number"
+                      min={5}
+                      max={60}
+                      className="w-full bg-gray-700 text-white rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      value={form.sitOutTimeoutMinutes}
+                      onChange={(e) => setForm({ ...form, sitOutTimeoutMinutes: Number(e.target.value) })}
+                    />
+                    <input
+                      type="range"
+                      min={5}
+                      max={60}
+                      step={5}
+                      value={form.sitOutTimeoutMinutes}
+                      onChange={(e) => setForm({ ...form, sitOutTimeoutMinutes: Number(e.target.value) })}
+                      className="w-full accent-amber-500 mt-1"
+                    />
+                  </div>
+                </div>
               </div>
 
               {/* ── Rebuy Settings ── */}

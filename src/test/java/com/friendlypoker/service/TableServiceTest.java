@@ -41,7 +41,7 @@ class TableServiceTest {
         when(clubMemberRepository.findByClubIdAndUserId(1L, 1L)).thenReturn(Optional.of(member));
 
         assertThatThrownBy(() -> tableService.createTable(1L,
-                new CreateTableRequest("Table", 5, 10, 6, 1000, 30), "alice"))
+                new CreateTableRequest("Table", 5, 10, 6, 1000, 30, 0, 0, 0, 0, false, 8), "alice"))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("Only owners and admins");
     }
